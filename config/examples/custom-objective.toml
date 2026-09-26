@@ -1,0 +1,38 @@
+# Example: a custom prioritization objective, no code changes needed.
+# Copy this file, edit it, and start the daemon with:
+#   PYTHONPATH=src python3 -m jevsec.service --prioritization-config config/examples/custom-objective.toml
+# The three objectives shipped in config/prioritization.toml are instances of
+# this same mechanism, not special cases.
+
+[backend]
+base_url = "http://127.0.0.1:8000"
+
+[thresholds]
+max_state_chars = 2000
+default_condition = 0.5
+
+[objectives.exfil_path.questions.q_egress]
+type = "noul"
+instructions = "The observation mentions an outbound channel (network, mail, cloud storage, removable media) usable to move data out."
+
+[objectives.exfil_path.questions.q_reachable]
+type = "noul"
+instructions = "The described outbound channel can actually be reached from the current position, as stated in the text."
+
+[objectives.exfil_path.questions.quick_win]
+type = "noul"
+instructions = "This observation can be acted on immediately with common tooling and low effort."
+
+[[objectives.exfil_path.rules]]
+name = "exfil_ready"
+score = 3
+conditions = { q_egress = 0.5, q_reachable = 0.5 }
+
+[[objectives.exfil_path.rules]]
+name = "channel_spotted"
+score = 1
+conditions = { q_egress = 0.5 }
+
+[objectives.exfil_path.default_rule]
+name = "no_signal"
+score = 0

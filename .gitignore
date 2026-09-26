@@ -1,0 +1,8 @@
+vendor/
+__pycache__/
+*.pyc
+.venv/
+dist/
+*.egg-info/
+results/sessions/
+results/*.log

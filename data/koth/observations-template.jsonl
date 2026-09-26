@@ -1,0 +1,3 @@
+{"id": "k1", "text": "FTP anonymous exposes a world-writable /share directory.", "context": "10.10.10.x:21"}
+{"id": "k2", "text": "Crontab runs /opt/monitor.sh as root; the file is writable by www-data.", "context": "10.10.10.x"}
+{"id": "k3", "text": "A user's SSH key is readable in a backup folder under /var/tmp.", "context": "10.10.10.x:22"}

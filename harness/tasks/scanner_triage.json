@@ -1,0 +1,35 @@
+{
+  "name": "scanner_triage",
+  "description": "Triage of scanner findings (nuclei-style): true/false positive, severity, reachability without auth.",
+  "questions": {
+    "verdict": {
+      "type": "choice",
+      "instructions": "Classify this scanner finding based only on the evidence included in it.",
+      "criteria": {
+        "true_positive": "The evidence in the finding confirms the vulnerability is present (matcher output, extracted proof, or verified response)",
+        "false_positive": "The evidence shows the vulnerability is absent (version newer than affected range, banner-only match, test string not reflected)",
+        "needs_review": "The evidence included is insufficient to decide either way"
+      }
+    },
+    "severity": {
+      "type": "score",
+      "instructions": "Assume the finding is a true positive: how severe is it for the target?",
+      "criteria": [
+        "Informational: no security impact, footprint information only",
+        "Low: minor issue, negligible or hard-to-reach impact",
+        "Medium: real impact on some data or functionality, limited scope",
+        "High: serious impact, sensitive data or strong primitive",
+        "Critical: full compromise, remote code execution or equivalent"
+      ]
+    },
+    "no_auth": {
+      "type": "noul",
+      "instructions": "Pre-authentication: the vulnerability can be reached and exploited on the target without valid credentials, a specific role, or internal access first."
+    }
+  },
+  "labels": {
+    "verdict": "choice",
+    "severity": "score",
+    "no_auth": "noul"
+  }
+}

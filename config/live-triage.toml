@@ -1,0 +1,42 @@
+# Configurazione live-triage: domande e soglie in un unico posto revisionabile.
+# Le domande sono la copia valida di harness/tasks/scanner_triage.json (spike 2026-09-22).
+
+[backend]
+base_url = "http://127.0.0.1:8000"   # solo locale per default (constitution I)
+timeout_s = 30.0
+# 004 FR-001/FR-002: una valutazione riuscita dichiara il backend raggiungibile
+# per questa finestra; oltre, al massimo UNA domanda di verifica per finestra.
+health_ttl_s = 300.0
+
+[thresholds]
+# Gate auto DISARMATO (Fase C negativa, 2026-09-24: iniezioni nel corpo delle
+# risposte spingono decider-2b oltre la soglia — results/adv_live_triage_decider2b.json).
+# Riattivare solo dopo mitigazione certificata o ricalibrazione su dati reali (Fase E).
+auto_gate_enabled = false
+auto_verdict = 0.80    # se il gate fosse armato: probabilità minima per il gate auto
+pre_auth = 0.50        # noul >= questo valore → raggiungibile pre-autenticazione
+max_state_chars = 2000 # troncamento del corpo prima dell'invio al modello
+
+[queue]
+# Ordine dei bucket della coda (il primo è la cima della coda).
+# I nomi sono fissi, l'ordine è revisionabile: vedi data-model.md.
+order = [
+    "auto_tp_preauth",    # auto + true_positive + pre-auth: agire subito
+    "review_tp",          # revisione umana, verdetto true_positive
+    "review_uncertain",   # revisione: needs_review o errore
+    "auto_tp_no_preauth", # auto + true_positive, richiede autenticazione
+    "false_positive",     # scartabili per ultimo
+]
+
+[questions.verdict]
+type = "choice"
+instructions = "Classify this scanner finding based only on the evidence included in it."
+
+[questions.verdict.criteria]
+true_positive = "The evidence in the finding confirms the vulnerability is present (matcher output, extracted proof, or verified response)"
+false_positive = "The evidence shows the vulnerability is absent (version newer than affected range, banner-only match, test string not reflected)"
+needs_review = "The evidence included is insufficient to decide either way"
+
+[questions.no_auth]
+type = "noul"
+instructions = "Pre-authentication: the vulnerability can be reached and exploited on the target without valid credentials, a specific role, or internal access first."

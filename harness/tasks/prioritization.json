@@ -1,0 +1,25 @@
+{
+  "name": "prioritization",
+  "description": "Priority scoring of engagement observations against the stated objective.",
+  "questions": {
+    "impact": {
+      "type": "score",
+      "instructions": "How much would successfully exploiting or resolving this observation advance the stated objective?",
+      "criteria": [
+        "Dead end: unrelated to the objective",
+        "Marginal: minor supporting information at best",
+        "Useful: real progress or a meaningful stepping stone",
+        "Strong: direct path to the objective or equivalent value",
+        "Decisive: achieves the objective outright"
+      ]
+    },
+    "quick_win": {
+      "type": "noul",
+      "instructions": "This observation can be checked or exploited quickly with low effort and standard tooling."
+    }
+  },
+  "labels": {
+    "impact": "score",
+    "quick_win": "noul"
+  }
+}

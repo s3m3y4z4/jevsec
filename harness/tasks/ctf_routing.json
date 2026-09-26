@@ -1,0 +1,40 @@
+{
+  "name": "ctf_routing",
+  "description": "Routing of a CTF challenge to an attack class plus auxiliary yes/no facts.",
+  "questions": {
+    "attack_class": {
+      "type": "choice",
+      "instructions": "Which attack class does this challenge most likely require to solve?",
+      "criteria": {
+        "sqli": "SQL injection to extract or bypass data",
+        "xss": "Cross-site scripting, injected in browser context",
+        "ssti": "Server-side template injection",
+        "jwt_flaw": "JWT or session token forgery, weak secret, missing verification",
+        "path_traversal": "File inclusion, path traversal, arbitrary file read",
+        "deserialization": "Insecure deserialization of data or objects",
+        "broken_auth": "Authentication bypass, logic flaw in login or password reset",
+        "crypto_classic": "Classical or handmade cipher to break",
+        "encoding": "Multi-layer encoding or obfuscation to peel",
+        "reverse_engineering": "Binary or bytecode analysis to recover logic",
+        "pwn_binary": "Memory corruption: buffer overflow, ROP, heap exploitation",
+        "forensics": "Artifact, memory, or network capture analysis",
+        "stego": "Hidden data inside images, audio, or containers",
+        "logic_flaw": "Application logic or race condition abuse",
+        "other": "None of the listed classes fits"
+      }
+    },
+    "has_server": {
+      "type": "noul",
+      "instructions": "Solving the challenge requires interacting with a remote service or web application."
+    },
+    "has_files": {
+      "type": "noul",
+      "instructions": "Solving the challenge requires analyzing provided files or attachments."
+    }
+  },
+  "labels": {
+    "attack_class": "choice",
+    "has_server": "noul",
+    "has_files": "noul"
+  }
+}

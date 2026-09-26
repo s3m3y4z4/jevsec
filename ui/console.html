@@ -1,0 +1,369 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>jevsecd — console</title>
+<style>
+  :root {
+    --bg: #101418; --panel: #171d24; --line: #26303a; --text: #c9d4de; --dim: #6b7a88;
+    --ok: #4cc38a; --bad: #e5546b; --warn: #d9a441; --accent: #62b0e3;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--text);
+         font: 13px/1.45 "JetBrains Mono", ui-monospace, "SF Mono", Menlo, Consolas, monospace; }
+  header { display: flex; flex-wrap: wrap; gap: 12px; align-items: center;
+           padding: 10px 16px; background: var(--panel); border-bottom: 1px solid var(--line); }
+  header h1 { font-size: 14px; margin: 0; color: var(--accent); letter-spacing: .04em; }
+  .pill { padding: 2px 10px; border: 1px solid var(--line); border-radius: 999px; font-size: 12px; }
+  .pill.ok { color: var(--ok); border-color: var(--ok); }
+  .pill.bad { color: var(--bad); border-color: var(--bad); }
+  main { padding: 16px; display: grid; gap: 16px; }
+  section { background: var(--panel); border: 1px solid var(--line); border-radius: 8px; }
+  section > h2 { font-size: 12px; margin: 0; padding: 8px 12px; color: var(--dim);
+                 text-transform: uppercase; letter-spacing: .08em; border-bottom: 1px solid var(--line); }
+  table { width: 100%; border-collapse: collapse; }
+  th, td { text-align: left; padding: 6px 12px; border-bottom: 1px solid var(--line); vertical-align: top; }
+  th { color: var(--dim); font-weight: 400; font-size: 11px; text-transform: uppercase; letter-spacing: .06em; }
+  tr.fresh td { background: rgba(98, 176, 227, .07); }
+  .gate-review { color: var(--warn); } .gate-auto { color: var(--ok); }
+  .err { color: var(--bad); }
+  details { padding: 6px 12px; }
+  summary { cursor: pointer; color: var(--accent); }
+  pre { margin: 6px 0; padding: 8px; background: var(--bg); border: 1px solid var(--line);
+        border-radius: 6px; overflow-x: auto; font-size: 12px; }
+  .bar { display: inline-block; min-width: 34px; color: var(--dim); }
+  .preview { color: var(--dim); font-size: 11px; margin-top: 2px; max-width: 520px; }
+  form.fb { display: grid; gap: 6px; padding: 8px 0 4px; max-width: 480px; }
+  form.fb label { color: var(--dim); font-size: 11px; }
+  form.fb input[type=text], form.fb input[type=number], form.fb textarea {
+    background: var(--bg); color: var(--text); border: 1px solid var(--line); border-radius: 4px; padding: 4px 8px; font: inherit; }
+  form.fb button { justify-self: start; background: var(--accent); color: #0b0f13; border: 0;
+    border-radius: 4px; padding: 5px 14px; font: inherit; cursor: pointer; }
+  form.fb .done { color: var(--ok); }
+  #session-controls { display: flex; gap: 8px; align-items: center; margin-left: auto; }
+  #session-controls input { background: var(--bg); color: var(--text); border: 1px solid var(--line);
+    border-radius: 4px; padding: 4px 8px; font: inherit; width: 140px; }
+  #session-controls button { background: var(--panel); color: var(--accent); border: 1px solid var(--accent);
+    border-radius: 4px; padding: 4px 10px; font: inherit; cursor: pointer; }
+  .ingest-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; padding: 12px; }
+  @media (max-width: 900px) { .ingest-grid { grid-template-columns: 1fr; } }
+  .empty { color: var(--dim); padding: 12px; }
+  footer { color: var(--dim); font-size: 11px; padding: 0 16px 16px; }
+</style>
+</head>
+<body>
+<header>
+  <h1>jevsecd</h1>
+  <span class="pill" id="svc">service: ?</span>
+  <span class="pill" id="backend">backend: ?</span>
+  <span class="pill bad" id="remote-warn" hidden>redacted engagement text leaves this machine</span>
+  <div id="session-controls">
+    <select id="session-select" title="session"></select>
+    <input id="session-new" placeholder="new session" pattern="[a-z0-9_-]+">
+    <button id="session-open">open</button>
+  </div>
+</header>
+<main>
+  <section id="ingest-section">
+    <h2>ingest — findings and observations</h2>
+    <div class="ingest-grid">
+      <form class="fb" id="finding-form">
+        <label>finding JSONL — one scanner finding per line
+          <textarea name="finding" rows="4" placeholder='{"template_id": "...", "matched_at": "https://192.0.2.10/", "response_snippet": "..."}' required></textarea></label>
+        <button type="submit">send findings</button>
+        <span class="done" hidden></span>
+      </form>
+      <form class="fb" id="observation-form">
+        <label>objective <input type="text" name="objective" placeholder="user_flag" required></label>
+        <label>observation JSONL — one observation per line
+          <textarea name="observation" rows="3" placeholder='{"id": "o1", "text": "..."}' required></textarea></label>
+        <label>context (optional, for observations without one) <input type="text" name="context"></label>
+        <button type="submit">send observations</button>
+        <span class="done" hidden></span>
+      </form>
+    </div>
+  </section>
+  <section id="triage-section">
+    <h2>triage — findings</h2>
+    <div id="triage-body"><div class="empty">no session</div></div>
+  </section>
+  <section id="prioritize-section">
+    <h2>prioritize — observations per objective</h2>
+    <div id="prioritize-body"><div class="empty">no session</div></div>
+  </section>
+</main>
+<footer>configs live in git: config/live-triage.toml · config/prioritization.toml — this console reads the queues and sends only what you submit.</footer>
+<script>
+"use strict";
+const REFRESH_MS = 2000;
+const REFRESH_HIDDEN_MS = 10000;
+const $ = (id) => document.getElementById(id);
+let current = null;
+let seen = new Set();
+let seenEver = new Set();
+let unseen = new Set();
+let baselineDone = false;
+let lastMaxSeq = -1;
+const fullRecords = new Map();
+
+async function jfetch(url, options) {
+  const response = await fetch(url, options);
+  const payload = await response.json().catch(() => ({}));
+  if (!response.ok) throw new Error(payload.error || response.status);
+  return payload;
+}
+
+function fmtProb(p) { return p === null || p === undefined ? "–" : p.toFixed(2); }
+
+function parseJsonl(text) {
+  const lines = text.split("\n").map((l) => l.trim()).filter(Boolean);
+  return lines.map((line) => JSON.parse(line));
+}
+
+function triageRow(record) {
+  const fresh = !seen.has("t:" + record.finding_ref) ? ' class="fresh"' : "";
+  seen.add("t:" + record.finding_ref);
+  return `<tr${fresh}>
+    <td class="gate-${record.gate}">${record.gate}</td>
+    <td>${record.verdict ?? "–"}</td>
+    <td class="bar">${fmtProb(record.verdict_probability)}</td>
+    <td>${record.no_auth === null ? "–" : (record.no_auth ? "yes" : "no")}</td>
+    <td>${record.severity ?? "–"}</td>
+    <td>${record.finding_ref}${record.error ? ` <span class="err">${record.error}</span>` : ""}</td>
+  </tr>
+  <tr><td colspan="6" style="padding:0"><details><summary>detail ${record.finding_ref}</summary>
+    <pre>${JSON.stringify(record, null, 2).replace(/</g, "&lt;")}</pre>
+  </details></td></tr>`;
+}
+
+function impactKey(objective, record) {
+  return `p:${objective}:${record.seq ?? record.obs_ref}`;
+}
+
+function impactRow(record, objective) {
+  const key = impactKey(objective, record);
+  const fresh = unseen.has(key) ? ' class="fresh"' : "";
+  const judgments = Object.entries(record.judgments || {})
+    .map(([k, v]) => `${k} ${fmtProb(v)}`).join(" · ") || "–";
+  const preview = record.text_preview ? `<div class="preview">${record.text_preview}</div>` : "";
+  const feedbackForm = record.error ? "" : `
+    <form class="fb" data-id="${record.obs_ref}">
+      <label>feedback — was the ranking right?
+        <input type="text" name="ranking_ok" placeholder="yes / no" required></label>
+      <label>correct impact (0–4) <input type="number" name="impact_giusto" min="0" max="4"></label>
+      <label>wrong judgments (separated by ;) <input type="text" name="giudizi"></label>
+      <label>note <input type="text" name="note"></label>
+      <button type="submit">send feedback</button>
+      <span class="done" hidden>written to feedback.jsonl</span>
+    </form>`;
+  return `<tr${fresh}>
+    <td>${record.impact ?? "–"}</td>
+    <td>${record.winning_rule ?? "–"}</td>
+    <td>${record.quick_win === null ? "–" : (record.quick_win ? "yes" : "no")}</td>
+    <td>${judgments}</td>
+    <td>${record.obs_ref}${record.error ? ` <span class="err">${record.error}</span>` : ""}${preview}</td>
+  </tr>
+  <tr><td colspan="5" style="padding:0"><details class="impact-detail" data-key="${key}">
+    <summary>detail ${record.obs_ref}</summary>
+    <pre class="obs-text" hidden></pre>
+    <pre>${JSON.stringify(record, null, 2).replace(/</g, "&lt;")}</pre>${feedbackForm}
+  </details></td></tr>`;
+}
+
+async function ensureFullRecords() {
+  if (fullRecords.size) return;
+  try {
+    const all = await jfetch(`/api/sessions/${current}/records`);
+    for (const [objective, records] of Object.entries(all.prioritize || {})) {
+      for (const record of records) fullRecords.set(impactKey(objective, record), record);
+    }
+  } catch { /* detail limited to the preview already on the page */ }
+}
+
+function fillObservation(details) {
+  ensureFullRecords().then(() => {
+    const record = fullRecords.get(details.dataset.key);
+    const target = details.querySelector(".obs-text");
+    if (!record || !target) return;
+    const observation = record.observation || {};
+    target.hidden = false;
+    target.textContent = `text: ${observation.text ?? "–"}` +
+      (observation.context ? `\ncontext: ${observation.context}` : "");
+  });
+}
+
+document.addEventListener("toggle", (event) => {
+  const details = event.target;
+  if (!(details instanceof HTMLDetailsElement) || !details.open) return;
+  if (details.dataset.key) unseen.delete(details.dataset.key);
+  if (details.classList.contains("impact-detail")) fillObservation(details);
+}, true);
+
+function renderQueue(queue) {
+  $("triage-body").innerHTML = queue.triage.length
+    ? `<table><tr><th>gate</th><th>verdict</th><th>p</th><th>pre</th><th>sev</th><th>finding</th></tr>
+       ${queue.triage.map(triageRow).join("")}</table>`
+    : '<div class="empty">no findings</div>';
+  const objectives = Object.entries(queue.prioritize || {});
+  $("prioritize-body").innerHTML = objectives.length
+    ? objectives.map(([objective, records]) => {
+        for (const record of records) {
+          const key = impactKey(objective, record);
+          if (baselineDone && !seenEver.has(key)) unseen.add(key);
+          seenEver.add(key);
+        }
+        return `
+      <h2 style="padding:8px 12px;border-bottom:1px solid var(--line)">objective: ${objective}</h2>
+      <table><tr><th>imp</th><th>rule</th><th>qw</th><th>judgments</th><th>obs</th></tr>
+      ${records.map((record) => impactRow(record, objective)).join("")}</table>`;
+      }).join("")
+    : '<div class="empty">no observations</div>';
+  const maxSeq = Math.max(-1, ...objectives.flatMap(([, records]) =>
+    records.map((record) => record.seq ?? -1)));
+  if (maxSeq !== lastMaxSeq) {
+    lastMaxSeq = maxSeq;
+    fullRecords.clear();
+  }
+  baselineDone = true;
+  bindFeedbackForms();
+}
+
+function markDone(form, message) {
+  const done = form.querySelector(".done");
+  done.hidden = false;
+  done.textContent = message;
+}
+
+function bindFeedbackForms() {
+  document.querySelectorAll("form.fb[data-id]").forEach((form) => {
+    if (form.dataset.bound) return;
+    form.dataset.bound = "1";
+    form.addEventListener("submit", async (event) => {
+      event.preventDefault();
+      const data = new FormData(form);
+      const body = {
+        id: form.dataset.id,
+        ranking_ok: String(data.get("ranking_ok")).trim().toLowerCase().startsWith("y"),
+        impact_giusto: data.get("impact_giusto") === "" ? null : Number(data.get("impact_giusto")),
+        giudizi_sbagliati: String(data.get("giudizi")).split(";").map((s) => s.trim()).filter(Boolean),
+        note: String(data.get("note") || ""),
+      };
+      try {
+        await jfetch(`/api/sessions/${current}/feedback`, {
+          method: "POST", body: JSON.stringify(body),
+        });
+        form.querySelector(".done").hidden = false;
+      } catch (error) {
+        alert(`feedback rejected: ${error.message}`);
+      }
+    });
+  });
+}
+
+function bindIngestForms() {
+  $("finding-form").addEventListener("submit", async (event) => {
+    event.preventDefault();
+    if (!current) { alert("open a session first"); return; }
+    const form = event.target;
+    let findings;
+    try {
+      findings = parseJsonl(new FormData(form).get("finding"));
+    } catch (error) { alert(`not valid JSONL: ${error.message}`); return; }
+    try {
+      const result = await jfetch(`/api/sessions/${current}/findings`, {
+        method: "POST", body: JSON.stringify(findings.length === 1 ? findings[0] : findings),
+      });
+      const records = Array.isArray(result) ? result : [result];
+      markDone(form, `sent: ${records.length} record(s)`);
+      refresh();
+    } catch (error) { alert(`findings rejected: ${error.message}`); }
+  });
+  $("observation-form").addEventListener("submit", async (event) => {
+    event.preventDefault();
+    if (!current) { alert("open a session first"); return; }
+    const form = event.target;
+    const data = new FormData(form);
+    let observations;
+    try {
+      observations = parseJsonl(data.get("observation"));
+    } catch (error) { alert(`not valid JSONL: ${error.message}`); return; }
+    const body = {
+      objective: String(data.get("objective")).trim(),
+      observations: observations.map((o) => (
+        o && !o.context && data.get("context") ? { ...o, context: String(data.get("context")) } : o
+      )),
+    };
+    try {
+      const result = await jfetch(`/api/sessions/${current}/observations`, {
+        method: "POST", body: JSON.stringify(body),
+      });
+      const records = Array.isArray(result) ? result : [result];
+      const duplicates = records.filter((r) => r && r.duplicate_of).length;
+      markDone(form, `sent: ${records.length - duplicates} evaluated, ${duplicates} duplicate(s)`);
+      refresh();
+    } catch (error) { alert(`observations rejected: ${error.message}`); }
+  });
+}
+
+async function refresh() {
+  try {
+    const status = await jfetch("/api/status");
+    $("svc").textContent = `service: ${status.version}`;
+    $("svc").className = "pill ok";
+    $("backend").textContent = `backend: ${status.backend.reachable ? "up" : "down"} (${status.backend.mode})`;
+    $("backend").className = `pill ${status.backend.reachable ? "ok" : "bad"}`;
+    $("remote-warn").hidden = status.backend.mode !== "remote-secure";
+    const select = $("session-select");
+    const known = status.sessions;
+    if (select.dataset.count !== String(known.length)) {
+      select.dataset.count = String(known.length);
+      select.innerHTML = known.map((n) => `<option ${n === current ? "selected" : ""}>${n}</option>`).join("");
+    }
+  } catch {
+    $("svc").textContent = "service: down"; $("svc").className = "pill bad";
+    return;
+  }
+  if (!current) return;
+  try {
+    renderQueue(await jfetch(`/api/sessions/${current}/queue`));
+  } catch (error) {
+    $("triage-body").innerHTML = `<div class="empty err">${error.message}</div>`;
+  }
+}
+
+function resetSessionView() {
+  seen = new Set(); seenEver = new Set(); unseen = new Set();
+  baselineDone = false; lastMaxSeq = -1; fullRecords.clear();
+}
+
+$("session-select").addEventListener("change", (e) => { current = e.target.value || null; resetSessionView(); refresh(); });
+$("session-open").addEventListener("click", async () => {
+  const name = $("session-new").value.trim();
+  if (!name) return;
+  try {
+    await jfetch("/api/sessions", { method: "POST", body: JSON.stringify({ name }) });
+    current = name; resetSessionView();
+    $("session-select").dataset.count = "";
+    refresh();
+  } catch (error) { alert(`session rejected: ${error.message}`); }
+});
+
+bindIngestForms();
+
+let refreshTimer = null;
+function scheduleRefresh() {
+  clearTimeout(refreshTimer);
+  refreshTimer = setTimeout(async () => { await refresh(); scheduleRefresh(); },
+                            document.hidden ? REFRESH_HIDDEN_MS : REFRESH_MS);
+}
+document.addEventListener("visibilitychange", () => {
+  if (!document.hidden) refresh();
+  scheduleRefresh();
+});
+
+refresh();
+scheduleRefresh();
+</script>
+</body>
+</html>

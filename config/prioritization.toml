@@ -1,0 +1,147 @@
+# Rubriche di prioritizzazione: domande atomiche per obiettivo + regole che il
+# codice ricombina in impatto 0-4. Revisionabile senza toccare codice (spec 002).
+# FR-010: niente parole-scenario nelle istruzioni — il modello giudica fatti, non contesti.
+
+[backend]
+base_url = "http://127.0.0.1:8000"
+timeout_s = 30.0
+
+[thresholds]
+max_state_chars = 2000
+default_condition = 0.50   # soglia di attivazione se una condizione non la dichiara
+
+# Mappa le frasi-obiettivo del bench (data/bench/prioritization.jsonl) ai nomi rubrica.
+# Serve solo al runner di verifica: non viene mai inviata al modello.
+[objective_names]
+domain_admin = "Compromise the corporate domain (obtain Domain Admin) from a workstation inside the network."
+user_flag = "Obtain the user flag in the home directory of user 'target' on the internal workstation."
+rce_app = "Achieve remote code execution on the web application at app.example.com."
+
+# ─── Rubrica: domain_admin ───────────────────────────────────────────────────
+# Affinata dopo la prima verifica (results/prioritization_v2_decider2b.json):
+# aggiunta is_reachable (i qualificatori di portata sono nel testo: "no route",
+# "unrelated server") e il livello percorso di escalation, separato dalle
+# credenziali. Le regole alte richiedono raggiungibilità.
+
+[objectives.domain_admin.questions.exposes_credentials]
+type = "noul"
+instructions = "The observation exposes usable authentication material: credentials, private keys, tokens, or recoverable passwords."
+
+[objectives.domain_admin.questions.is_privileged]
+type = "noul"
+instructions = "The described account or settings grant administrative control over other systems, not only the local one."
+
+[objectives.domain_admin.questions.is_reachable]
+type = "noul"
+instructions = "The described system or account can actually be reached or used from the current position, as stated in the text."
+
+[objectives.domain_admin.questions.is_escalation_path]
+type = "noul"
+instructions = "The observation describes a known way to raise privileges from the current position, without granting them directly."
+
+[objectives.domain_admin.questions.quick_win]
+type = "noul"
+instructions = "This observation can be acted on immediately with common tooling and low effort."
+
+[[objectives.domain_admin.rules]]
+name = "privileged_credentials"
+score = 4
+conditions = { exposes_credentials = 0.5, is_privileged = 0.5, is_reachable = 0.5 }
+
+[[objectives.domain_admin.rules]]
+name = "credentials"
+score = 3
+conditions = { exposes_credentials = 0.5, is_reachable = 0.5 }
+
+[[objectives.domain_admin.rules]]
+name = "escalation_path"
+score = 2
+conditions = { is_escalation_path = 0.5, is_reachable = 0.5 }
+
+[objectives.domain_admin.default_rule]
+name = "no_signal"
+score = 0
+
+# ─── Rubrica: user_flag ──────────────────────────────────────────────────────
+# Affinata: le osservazioni descrivono spesso PERCORSI per agire da un certo
+# utente, non materiale contenuto: aggiunto is_path_as_user; credenziali e
+# escalation livellati; tutto dietro is_reachable.
+
+[objectives.user_flag.questions.exposes_credentials]
+type = "noul"
+instructions = "The observation exposes usable authentication material: credentials, private keys, tokens, or recoverable passwords."
+
+[objectives.user_flag.questions.is_path_as_user]
+type = "noul"
+instructions = "The observation provides a way to run commands or read files as the specific user of interest."
+
+[objectives.user_flag.questions.is_reachable]
+type = "noul"
+instructions = "The described system or account can actually be reached or used from the current position, as stated in the text."
+
+[objectives.user_flag.questions.is_escalation_path]
+type = "noul"
+instructions = "The observation describes a known way to raise privileges on the described system."
+
+[objectives.user_flag.questions.quick_win]
+type = "noul"
+instructions = "This observation can be acted on immediately with common tooling and low effort."
+
+[[objectives.user_flag.rules]]
+name = "path_as_user"
+score = 4
+conditions = { is_path_as_user = 0.5, is_reachable = 0.5 }
+
+[[objectives.user_flag.rules]]
+name = "escalation_on_host"
+score = 3
+conditions = { is_escalation_path = 0.5, is_reachable = 0.5 }
+
+[[objectives.user_flag.rules]]
+name = "credentials"
+score = 2
+conditions = { exposes_credentials = 0.5, is_reachable = 0.5 }
+
+[objectives.user_flag.default_rule]
+name = "no_signal"
+score = 0
+
+# ─── Rubrica: rce_app ────────────────────────────────────────────────────────
+# Rifatta: la prima versione aveva solo il livello "esecuzione dimostrata" e
+# sprofondava tutto in no_signal. Ora: punto di iniezione (4), via di takeover
+# o upload pericoloso (3), superficie attaccabile (2).
+
+[objectives.rce_app.questions.is_injection_point]
+type = "noul"
+instructions = "The observation identifies an input that changes how the application processes data when crafted content is supplied."
+
+[objectives.rce_app.questions.is_takeover_lead]
+type = "noul"
+instructions = "The observation exposes something that could allow taking over an application account, such as a token, a dangerous upload, or exposed internal source."
+
+[objectives.rce_app.questions.is_attack_surface]
+type = "noul"
+instructions = "The observation points to a part of the application worth probing further, without demonstrating a specific flaw."
+
+[objectives.rce_app.questions.quick_win]
+type = "noul"
+instructions = "This observation can be acted on immediately with common tooling and low effort."
+
+[[objectives.rce_app.rules]]
+name = "injection_point"
+score = 4
+conditions = { is_injection_point = 0.5 }
+
+[[objectives.rce_app.rules]]
+name = "takeover_lead"
+score = 3
+conditions = { is_takeover_lead = 0.5 }
+
+[[objectives.rce_app.rules]]
+name = "attack_surface"
+score = 2
+conditions = { is_attack_surface = 0.5 }
+
+[objectives.rce_app.default_rule]
+name = "no_signal"
+score = 0
