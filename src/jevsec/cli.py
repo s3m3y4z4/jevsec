@@ -66,13 +66,19 @@ def build_parser() -> argparse.ArgumentParser:
     nxt.add_argument("--objective", required=True, help="objective with a rubric")
     nxt.add_argument("--since-seq", type=int, default=None, help="cursor of the previous read: only newer records")
     nxt.add_argument("--top-k", type=int, default=None, help="how many records at the top (service default: 5)")
+    run = session_commands.add_parser("run", help="run an assisted action: shows the command, asks confirmation")
+    run.add_argument("--session", required=True, help="target session")
+    run.add_argument("--ref", required=True, help="finding_ref or obs_ref of the record")
+    run.add_argument("--template", required=True, help="playbook template id, e.g. triage.review_tp")
     feedback = session_commands.add_parser("feedback", help="record your judgment on a record")
     feedback.add_argument("--session", required=True, help="target session")
     feedback.add_argument("--ref", required=True, help="obs_ref of the record")
     feedback.add_argument("--ranking-ok", required=True, choices=("true", "false"), help="was the ranking right?")
     feedback.add_argument("--impact", type=int, default=None, help="the impact you consider correct (0-4)")
     feedback.add_argument("--notes", default=None, help="free-text notes")
-    for command in (new, add_finding, add_observation, queue, nxt, feedback):
+    acts = session_commands.add_parser("actions", help="read the session action audit log")
+    acts.add_argument("--session", required=True, help="target session")
+    for command in (new, add_finding, add_observation, queue, nxt, feedback, run, acts):
         command.add_argument("--url", default=DEFAULT_SERVICE_URL, help=f"jevsecd base URL (default: {DEFAULT_SERVICE_URL})")
         command.add_argument("--json", action="store_true", help="raw JSON output")
     return parser
@@ -392,6 +398,69 @@ def run_session_next(args: argparse.Namespace) -> int:
     return EXIT_OK
 
 
+def run_session_run(args: argparse.Namespace) -> int:
+    if not sys.stdin.isatty():
+        print("session: interactive confirmation required (no TTY)", file=sys.stderr)
+        return EXIT_FATAL
+    try:
+        session = args.session
+        queues = _service_call(args.url, "GET", f"/api/sessions/{session}/queue")
+        record = None
+        for candidate in queues.get("triage", []):
+            if candidate.get("finding_ref") == args.ref:
+                record = candidate
+        if record is None:
+            for candidates in queues.get("prioritize", {}).values():
+                for candidate in candidates:
+                    if candidate.get("obs_ref") == args.ref:
+                        record = candidate
+        if record is None:
+            raise ValueError(f"record {args.ref!r} not found in session {session!r}")
+        playbook = record.get("playbook") or {}
+        if playbook.get("template") != args.template or "argv" not in playbook:
+            raise ValueError(f"no executable proposal {args.template!r} for {args.ref!r}")
+        argv = playbook["argv"]
+        print(f"{playbook.get('description', '')}")
+        print("  " + " ".join(argv))
+        answer = input("execute this exact command? [y/N] ").strip().lower()
+        if answer not in ("y", "yes"):
+            print("aborted")
+            return EXIT_OK
+        result = _service_call(args.url, "POST", f"/api/sessions/{session}/actions",
+                               {"ref": args.ref, "template": args.template, "confirm": argv})
+    except ValueError as error:
+        print(f"session: {error}", file=sys.stderr)
+        return EXIT_FATAL
+    if args.json:
+        print(json.dumps(result, ensure_ascii=False))
+        return EXIT_OK
+    print(f"exit {result['exit_code']} in {result['duration_ms']} ms")
+    for stream in ("stdout", "stderr"):
+        text = result.get(stream) or ""
+        if text:
+            print(f"-- {stream} --\n{text.rstrip()}")
+    return EXIT_OK
+
+
+def run_session_actions(args: argparse.Namespace) -> int:
+    try:
+        entries = _service_call(args.url, "GET", f"/api/sessions/{args.session}/actions")
+    except ValueError as error:
+        print(f"session: {error}", file=sys.stderr)
+        return EXIT_FATAL
+    if args.json:
+        for entry in entries:
+            print(json.dumps(entry, ensure_ascii=False))
+        return EXIT_OK
+    if not entries:
+        print("no actions executed in this session")
+        return EXIT_OK
+    for entry in entries:
+        print(f"{entry['ts']} {entry['ref']} [{entry['template']}] exit {entry['exit_code']} in {entry['duration_ms']} ms")
+        print("  " + " ".join(entry["argv"]))
+    return EXIT_OK
+
+
 def run_session_feedback(args: argparse.Namespace) -> int:
     body: dict[str, Any] = {"id": args.ref, "ranking_ok": args.ranking_ok == "true"}
     if args.impact is not None:
@@ -422,6 +491,8 @@ def main(argv: list[str] | None = None) -> int:
             "queue": run_session_queue,
             "next": run_session_next,
             "feedback": run_session_feedback,
+            "run": run_session_run,
+            "actions": run_session_actions,
         }
         return handlers[args.session_command](args)
     return EXIT_FATAL

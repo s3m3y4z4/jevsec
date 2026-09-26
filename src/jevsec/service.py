@@ -21,10 +21,11 @@ from typing import Any
 from urllib.parse import parse_qs
 
 from jevsec import __version__
+from jevsec.actions import ActionRefused, ActionsConfig, execute_action, load_actions_config, proposal_for
 from jevsec.client import SystemOneError, ask
 from jevsec.config import Config, channel_violation, is_loopback_url, load_config
 from jevsec.prioritize import build_state, observation_hash, prioritize_observation, sort_impact_records
-from jevsec.queue import sort_records
+from jevsec.queue import bucket_of, sort_records
 from jevsec.rubric import PrioritizationConfig, load_rubric
 from jevsec.triage import triage_finding
 
@@ -61,11 +62,13 @@ class SessionError(RuntimeError):
 class Session:
     """Una sessione d'engagement: stato in memoria + write-through su disco."""
 
-    def __init__(self, directory: Path, triage_config: Config, prioritization_config: PrioritizationConfig):
+    def __init__(self, directory: Path, triage_config: Config, prioritization_config: PrioritizationConfig,
+                 actions_config: ActionsConfig | None = None):
         self.name = directory.name
         self.directory = directory
         self.triage_config = triage_config
         self.prioritization_config = prioritization_config
+        self.actions_config = actions_config or ActionsConfig()
         self.lock = threading.Lock()
         self.triage_records: list[dict[str, Any]] = []
         self.impact_records: dict[str, list[dict[str, Any]]] = {}
@@ -152,20 +155,28 @@ class Session:
             raise SessionError(f"unknown objective {objective!r}")
         records = self.impact_records.get(objective, [])
         cursor = max((int(record.get("seq") or 0) for record in records), default=0)
-        top = sort_impact_records(list(records))[:top_k]
-        fresh = ([record for record in records if int(record.get("seq") or 0) > since_seq]
+        top = [self._with_playbook(dict(record)) for record in sort_impact_records(list(records))[:top_k]]
+        fresh = ([self._with_playbook(dict(record)) for record in records if int(record.get("seq") or 0) > since_seq]
                  if since_seq is not None else [])
         fresh.sort(key=lambda record: int(record.get("seq") or 0))
         return {"objective": objective, "cursor": cursor, "top": top, "fresh": fresh}
 
     def queues(self) -> dict[str, Any]:
         return {
-            "triage": sort_records(list(self.triage_records), self.triage_config.queue_order),
+            "triage": [
+                {**record, "playbook": proposal_for(record, self.actions_config, bucket=bucket_of(record))}
+                for record in sort_records(list(self.triage_records), self.triage_config.queue_order)
+            ],
             "prioritize": {
-                objective: [_light_copy(record) for record in sort_impact_records(list(records))]
+                objective: [self._with_playbook(_light_copy(record))
+                            for record in sort_impact_records(list(records))]
                 for objective, records in self.impact_records.items()
             },
         }
+
+    def _with_playbook(self, record: dict[str, Any]) -> dict[str, Any]:
+        record["playbook"] = proposal_for(record, self.actions_config)
+        return record
 
     def records(self) -> dict[str, Any]:
         return {"triage": list(self.triage_records), "prioritize": {k: list(v) for k, v in self.impact_records.items()}}
@@ -196,13 +207,26 @@ class Session:
         return feedback
 
 
+def find_record_by_ref(session: Session, ref: str) -> dict[str, Any] | None:
+    for record in session.triage_records:
+        if record.get("finding_ref") == ref:
+            return record
+    for records in session.impact_records.values():
+        for record in records:
+            if record.get("obs_ref") == ref:
+                return record
+    return None
+
+
 class SessionStore:
     """Apre e ricorda le sessioni; tutto sotto la stessa directory."""
 
-    def __init__(self, sessions_dir: Path, triage_config: Config, prioritization_config: PrioritizationConfig):
+    def __init__(self, sessions_dir: Path, triage_config: Config, prioritization_config: PrioritizationConfig,
+                 actions_config: ActionsConfig | None = None):
         self.sessions_dir = Path(sessions_dir)
         self.triage_config = triage_config
         self.prioritization_config = prioritization_config
+        self.actions_config = actions_config or ActionsConfig()
         self.sessions: dict[str, Session] = {}
         self.lock = threading.Lock()
 
@@ -211,7 +235,9 @@ class SessionStore:
             raise SessionError(f"invalid session name {name!r}: allowed a-z 0-9 _ -")
         with self.lock:
             if name not in self.sessions:
-                self.sessions[name] = Session(self.sessions_dir / name, self.triage_config, self.prioritization_config)
+                self.sessions[name] = Session(
+                    self.sessions_dir / name, self.triage_config, self.prioritization_config, self.actions_config
+                )
             return self.sessions[name]
 
     def known_names(self) -> list[str]:
@@ -223,9 +249,10 @@ def build_service(
     triage_config: Config,
     prioritization_config: PrioritizationConfig,
     port: int = 0,
+    actions_config: ActionsConfig | None = None,
 ) -> tuple[ThreadingHTTPServer, SessionStore, dict[str, Any]]:
     """Costruisce demone + store + stato condiviso (salute backend a piggyback, 004 D1)."""
-    store = SessionStore(sessions_dir, triage_config, prioritization_config)
+    store = SessionStore(sessions_dir, triage_config, prioritization_config, actions_config)
     shared: dict[str, Any] = {
         "backend_health": {"last_success": None, "last_failure": None, "last_success_wall": None}
     }
@@ -314,12 +341,22 @@ def build_service(
                         "service": "jevsecd",
                         "version": SERVICE_VERSION,
                         "sessions": store.known_names(),
+                        "actions": {"enabled": store.actions_config.enabled},
                         "backend": {
                             "mode": "loopback" if is_loopback_url(triage_config.base_url) else "remote-secure",
                             "reachable": backend_reachable(),
                             "last_success_ts": shared["backend_health"]["last_success_wall"],
                         },
                     })
+                    return
+                if len(parts) == 4 and parts[:2] == ["api", "sessions"] and parts[3] == "actions":
+                    session = self._session(parts[2])
+                    audit_path = session.directory / "actions.jsonl"
+                    entries = []
+                    if audit_path.exists():
+                        with audit_path.open(encoding="utf-8") as handle:
+                            entries = [json.loads(line) for line in handle if line.strip()]
+                    self._reply(200, entries)
                     return
                 if len(parts) == 4 and parts[:2] == ["api", "sessions"] and parts[3] in ("queue", "records"):
                     session = self._session(parts[2])
@@ -388,6 +425,30 @@ def build_service(
                                 note_backend_outcome(record.get("error") is None)
                         self._reply(200, records if len(records) != 1 else records[0])
                         return
+                    if parts[3] == "actions":
+                        payload = self._body_objects()
+                        if not isinstance(payload, dict) or not payload.get("ref") or not payload.get("template"):
+                            raise SessionError("expected {\"ref\": ..., \"template\": ..., \"confirm\": [...]}")
+                        confirm = payload.get("confirm")
+                        if not isinstance(confirm, list) or not all(isinstance(c, str) for c in confirm):
+                            raise SessionError("confirm expected as a list of strings")
+                        record = find_record_by_ref(session, str(payload["ref"]))
+                        if record is None:
+                            raise SessionError(f"record {payload['ref']!r} is not in this session")
+                        try:
+                            result = execute_action(
+                                session_name=session.name,
+                                session_dir=session.directory,
+                                record=record,
+                                template_name=str(payload["template"]),
+                                confirm=confirm,
+                                config=session.actions_config,
+                            )
+                        except ActionRefused as error:
+                            self._reply(400, {"error": str(error)})
+                            return
+                        self._reply(200, result)
+                        return
                     if parts[3] == "feedback":
                         payload = self._body_objects()
                         if not isinstance(payload, dict):
@@ -419,6 +480,8 @@ def main() -> int:
     parser.add_argument("--triage-config", type=Path, default=Path("config/live-triage.toml"))
     parser.add_argument("--prioritization-config", type=Path, default=Path("config/prioritization.toml"))
     parser.add_argument("--base-url", default=None, help="override the backend for both configs")
+    parser.add_argument("--actions-config", type=Path, default=Path("config/actions.toml"),
+                        help="actions/playbook TOML config (default: config/actions.toml)")
     args = parser.parse_args()
 
     triage_config = load_config(args.triage_config)
@@ -431,7 +494,9 @@ def main() -> int:
         triage_config = dataclasses.replace(triage_config, base_url=args.base_url)
         prioritization_config = dataclasses.replace(prioritization_config, base_url=args.base_url)
 
-    server, _, _ = build_service(args.sessions_dir, triage_config, prioritization_config, port=args.port)
+    actions_config = load_actions_config(args.actions_config)
+    server, _, _ = build_service(args.sessions_dir, triage_config, prioritization_config, port=args.port,
+                                 actions_config=actions_config)
     print(f"jevsecd {SERVICE_VERSION} on http://{LOCALHOST}:{server.server_address[1]} (sessions: {args.sessions_dir})", flush=True)
     try:
         server.serve_forever()

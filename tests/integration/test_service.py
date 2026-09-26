@@ -365,5 +365,123 @@ class TestRemoteChannelSurface(unittest.TestCase):
         self.assertNotIn("doc-token", dumped)
 
 
+class TestPlaybookInQueue(unittest.TestCase):
+    """Spec 006 US1/FR-001: le code espongono la proposta; i record su disco restano senza."""
+
+    def setUp(self) -> None:
+        import dataclasses
+        from jevsec.actions import load_actions_config
+
+        mock_server = HTTPServer(("127.0.0.1", 0), CountingHandler)
+        threading.Thread(target=mock_server.serve_forever, daemon=True).start()
+        self.mock_server = mock_server
+        self.sessions_dir = Path(tempfile.mkdtemp())
+        triage = dataclasses.replace(load_config(TRIAGE_CONFIG_PATH), base_url=f"http://127.0.0.1:{mock_server.server_address[1]}")
+        rubric = dataclasses.replace(load_rubric(PRIORITIZATION_CONFIG_PATH), base_url=f"http://127.0.0.1:{mock_server.server_address[1]}")
+        actions = load_actions_config(REPO_ROOT / "config" / "examples" / "actions.toml")
+        self.server, self.store, _ = build_service(self.sessions_dir, triage, rubric, port=0, actions_config=actions)
+        threading.Thread(target=self.server.serve_forever, daemon=True).start()
+        self.base = f"http://127.0.0.1:{self.server.server_address[1]}"
+        self.addCleanup(self.server.shutdown)
+        self.addCleanup(mock_server.shutdown)
+
+    def test_queue_e_next_espongono_playbook(self) -> None:
+        api(self.base, "POST", "/api/sessions", {"name": "pb"})
+        finding = {"template_id": "doc-example", "matched_at": "https://192.0.2.10:8443/admin",
+                   "response_snippet": "root banner"}
+        status, _ = api(self.base, "POST", "/api/sessions/pb/findings", finding)
+        self.assertEqual(status, 200)
+        status, _ = api(self.base, "POST", "/api/sessions/pb/observations",
+                        {"objective": "user_flag",
+                         "observation": {"id": "o1", "text": "Crontab runs /opt/monitor.sh as root; writable by www-data."}})
+        self.assertEqual(status, 200)
+
+        _, queue = api(self.base, "GET", "/api/sessions/pb/queue")
+        triage_record = queue["triage"][0]
+        self.assertIn("playbook", triage_record)
+        self.assertIsNotNone(triage_record["playbook"])
+        self.assertIn("argv", triage_record["playbook"])
+        self.assertIn("192.0.2.10", triage_record["playbook"]["argv"])
+        impact_record = queue["prioritize"]["user_flag"][0]
+        self.assertIn("suggestion", impact_record["playbook"])
+
+        _, advice = api(self.base, "GET", "/api/sessions/pb/next?objective=user_flag")
+        self.assertIn("playbook", advice["top"][0])
+
+        on_disk = json.loads((self.sessions_dir / "pb" / "triage.jsonl").read_text(encoding="utf-8").splitlines()[0])
+        self.assertNotIn("playbook", on_disk)  # la proposta vive nel payload, non nel record
+
+
+class TestActionsEndpoint(unittest.TestCase):
+    """Spec 006 US2: endpoint esecuzione assistita end-to-end (echo reale, rifiuti, audit)."""
+
+    EXEC_ACTIONS = """\
+[triage.review_tp]
+description = "Echo probe"
+command = ["/bin/echo", "probe", "{host}"]
+
+[allowlist]
+tools = ["/bin/echo"]
+
+[scope]
+targets = ["192.0.2.0/24"]
+
+[execution]
+timeout_s = 30
+"""
+
+    def setUp(self) -> None:
+        import dataclasses
+        from jevsec.actions import load_actions_config
+
+        mock_server = HTTPServer(("127.0.0.1", 0), CountingHandler)
+        threading.Thread(target=mock_server.serve_forever, daemon=True).start()
+        self.mock_server = mock_server
+        self.sessions_dir = Path(tempfile.mkdtemp())
+        triage = dataclasses.replace(load_config(TRIAGE_CONFIG_PATH), base_url=f"http://127.0.0.1:{mock_server.server_address[1]}")
+        rubric = dataclasses.replace(load_rubric(PRIORITIZATION_CONFIG_PATH), base_url=f"http://127.0.0.1:{mock_server.server_address[1]}")
+        handle = tempfile.NamedTemporaryFile("w", suffix=".toml", delete=False, encoding="utf-8")
+        handle.write(self.EXEC_ACTIONS)
+        handle.close()
+        actions = load_actions_config(Path(handle.name))
+        self.server, self.store, _ = build_service(self.sessions_dir, triage, rubric, port=0, actions_config=actions)
+        threading.Thread(target=self.server.serve_forever, daemon=True).start()
+        self.base = f"http://127.0.0.1:{self.server.server_address[1]}"
+        self.addCleanup(self.server.shutdown)
+        self.addCleanup(mock_server.shutdown)
+        api(self.base, "POST", "/api/sessions", {"name": "act"})
+        finding = {"template_id": "doc-example", "matched_at": "https://192.0.2.10:8443/admin",
+                   "response_snippet": "root banner"}
+        status, record = api(self.base, "POST", "/api/sessions/act/findings", finding)
+        self.assertEqual(status, 200)
+        self.ref = record["finding_ref"]
+
+    def test_esecuzione_con_conferma_e_audit_leggibile(self) -> None:
+        status, result = api(self.base, "POST", "/api/sessions/act/actions",
+                             {"ref": self.ref, "template": "triage.review_tp",
+                              "confirm": ["/bin/echo", "probe", "192.0.2.10"]})
+        self.assertEqual(status, 200)
+        self.assertEqual(result["exit_code"], 0)
+        self.assertIn("probe 192.0.2.10", result["stdout"])
+        status, audit = api(self.base, "GET", "/api/sessions/act/actions")
+        self.assertEqual(status, 200)
+        self.assertEqual(len(audit), 1)
+        self.assertEqual(audit[0]["argv"], ["/bin/echo", "probe", "192.0.2.10"])
+
+    def test_rifiuti_con_messaggi_esatti_e_zero_audit(self) -> None:
+        cases = [
+            ({"ref": self.ref, "template": "triage.review_tp",
+              "confirm": ["/bin/echo", "probe", "203.0.113.9"]}, "confirm does not match"),
+            ({"ref": self.ref, "template": "triage.niente", "confirm": []}, "unknown template"),
+            ({"ref": "fantasma", "template": "triage.review_tp", "confirm": []}, "is not in this session"),
+        ]
+        for body, expected in cases:
+            status, error = api(self.base, "POST", "/api/sessions/act/actions", body)
+            self.assertEqual(status, 400, body)
+            self.assertIn(expected, error["error"])
+        status, audit = api(self.base, "GET", "/api/sessions/act/actions")
+        self.assertEqual(audit, [])
+
+
 if __name__ == "__main__":
     unittest.main()

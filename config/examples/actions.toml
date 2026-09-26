@@ -1,0 +1,45 @@
+# Example actions config — exported, INERT by design (spec 006).
+# The allowlist is empty: execution stays disabled until you declare tools.
+# Suggestions and commands are proposals computed by the code from the record:
+# the model never takes part in building them.
+
+# ── Triage: one template per bucket, `command` (executable) or `suggestion` (text only) ──
+
+[triage.auto_tp_preauth]
+description = "Confirm the pre-auth exposure before deeper checks"
+command = ["curl", "-sS", "-o", "/dev/null", "-w", "%{http_code}", "{scheme}://{host}:{port}/{path}"]
+
+[triage.review_tp]
+description = "Verify the service surface before deeper checks"
+command = ["nmap", "-sV", "-p", "{port}", "{host}"]
+
+[triage.review_uncertain]
+description = "Re-check the evidence with a targeted request"
+suggestion = "Re-run the scanner template with verbose output and compare the snippet"
+
+[triage.auto_tp_no_preauth]
+description = "Confirm the service with authenticated context"
+suggestion = "Retry the check with the engagement's test credentials, from the pivot host"
+
+[triage.false_positive]
+description = "Close the loop: document why it is not real"
+suggestion = "Note the false positive reason in the report and move on"
+
+# ── Prioritize: one template per winning rule, suggestions only ──
+
+[prioritize.credentials]
+description = "Verify credential reuse on in-scope services only"
+suggestion = "Try the recovered credentials against the declared in-scope services only"
+
+[prioritize.path_as_user]
+description = "Confirm execution as the user of interest"
+suggestion = "Trigger the scheduled path and check the process owner on the target"
+
+[allowlist]
+tools = []   # empty ⇒ execution disabled; declare executable names to enable
+
+[scope]
+targets = ["192.0.2.0/24", "198.51.100.0/24", ".example.com"]   # documentation-reserved values
+
+[execution]
+timeout_s = 120

@@ -58,5 +58,63 @@ class TestSessionErrors(unittest.TestCase):
         self.assertIn("python3 -m jevsec.service", message)
 
 
+class FakeTty(io.StringIO):
+    def isatty(self) -> bool:
+        return True
+
+
+class TestSessionRun(unittest.TestCase):
+    """Spec 006 US2: conferma interattiva per-azione; senza TTY mai esecuzione."""
+
+    def test_run_senza_tty_rifiutato_prima_di_ogni_rete(self) -> None:
+        with mock.patch("sys.stderr", io.StringIO()) as stderr, \
+                mock.patch.object(cli, "_service_call") as service_call:
+            code = cli.main(["session", "run", "--session", "s", "--ref", "r", "--template", "t",
+                             "--url", "http://127.0.0.1:1"])
+        self.assertEqual(code, 2)
+        self.assertIn("interactive confirmation required", stderr.getvalue())
+        service_call.assert_not_called()  # senza TTY nemmeno la coda viene chiesta
+
+    def test_run_con_tty_conferma_no_non_esegue(self) -> None:
+        args = cli.build_parser().parse_args(
+            ["session", "run", "--session", "s", "--ref", "r1:t", "--template", "triage.review_tp",
+             "--url", "http://127.0.0.1:1"])
+        queue_payload = {"triage": [{"finding_ref": "r1:t",
+                                     "playbook": {"template": "triage.review_tp",
+                                                  "description": "Echo probe",
+                                                  "argv": ["/bin/echo", "probe", "192.0.2.10"]}}]}
+        with mock.patch.object(cli, "_service_call", return_value=queue_payload), \
+                mock.patch("sys.stdin", FakeTty("n\n")), \
+                mock.patch("sys.stdout", io.StringIO()) as stdout:
+            code = cli.run_session_run(args)
+        self.assertEqual(code, 0)
+        self.assertIn("aborted", stdout.getvalue())
+
+    def test_run_con_tty_conferma_si_invia_confirm_esatto(self) -> None:
+        args = cli.build_parser().parse_args(
+            ["session", "run", "--session", "s", "--ref", "r1:t", "--template", "triage.review_tp",
+             "--url", "http://127.0.0.1:1"])
+        queue_payload = {"triage": [{"finding_ref": "r1:t",
+                                     "playbook": {"template": "triage.review_tp",
+                                                  "description": "Echo probe",
+                                                  "argv": ["/bin/echo", "probe", "192.0.2.10"]}}]}
+        calls = {}
+
+        def fake_call(url, method, path, body=None):
+            calls["path"], calls["body"] = path, body
+            if method == "GET":
+                return queue_payload
+            return {"exit_code": 0, "stdout": "probe 192.0.2.10\n", "stderr": "", "duration_ms": 3,
+                    "ts": "", "session": "s", "ref": "r1:t", "template": "triage.review_tp",
+                    "argv": body["confirm"], "target": ["192.0.2.10"]}
+
+        with mock.patch.object(cli, "_service_call", side_effect=fake_call), \
+                mock.patch("sys.stdin", FakeTty("y\n")), \
+                mock.patch("sys.stdout", io.StringIO()):
+            code = cli.run_session_run(args)
+        self.assertEqual(code, 0)
+        self.assertEqual(calls["body"]["confirm"], ["/bin/echo", "probe", "192.0.2.10"])
+
+
 if __name__ == "__main__":
     unittest.main()

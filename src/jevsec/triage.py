@@ -8,6 +8,7 @@ from __future__ import annotations
 
 from typing import Any, Callable
 
+from jevsec.actions import target_from_url
 from jevsec.client import SystemOneError, answer_probability, answer_value, ask
 from jevsec.config import Config
 from jevsec.queue import GATE_AUTO, VERDICT_NEEDS_REVIEW
@@ -27,23 +28,31 @@ def _base_record(finding_ref: str) -> dict[str, Any]:
         "gate": "review",
         "truncated": False,
         "error": None,
+        "target": None,
+        "state": None,
     }
 
 
-def _error_record(finding_ref: str, error: str, truncated: bool = False, severity: str | None = None) -> dict[str, Any]:
+def _error_record(
+    finding_ref: str, error: str, truncated: bool = False, severity: str | None = None,
+    target: dict[str, str] | None = None, state: dict[str, Any] | None = None,
+) -> dict[str, Any]:
     record = _base_record(finding_ref)
     record["error"] = error
     record["truncated"] = truncated
     record["severity"] = severity
+    record["target"] = target
+    record["state"] = state
     return record
 
 
 def triage_finding(finding: dict[str, Any], finding_ref: str, config: Config, ask_fn: AskFunction = ask) -> dict[str, Any]:
     """Un finding → un TriageRecord completo o in errore (sempre gate=review se in errore)."""
     severity = finding.get("info", {}).get("severity") if isinstance(finding.get("info"), dict) else None
+    target = target_from_url(finding.get("matched_at", ""))
 
     if not finding.get("template_id"):
-        return _error_record(finding_ref, "template_id missing: finding cannot be identified", severity=severity)
+        return _error_record(finding_ref, "template_id missing: finding cannot be identified", severity=severity, target=target)
 
     state, was_truncated = build_state(finding, config.max_state_chars)
 
@@ -53,16 +62,20 @@ def triage_finding(finding: dict[str, Any], finding_ref: str, config: Config, as
             "textual evidence missing (response_snippet and extracted_results absent or empty): nothing to judge",
             truncated=was_truncated,
             severity=severity,
+            target=target,
+            state=state,
         )
 
     try:
         response, _latency = ask_fn(config.base_url, state, config.questions, config.timeout_s, api_token=config.api_token, model=config.model)
     except SystemOneError as error:
-        return _error_record(finding_ref, f"engine: {error}", truncated=was_truncated, severity=severity)
+        return _error_record(finding_ref, f"engine: {error}", truncated=was_truncated, severity=severity, target=target)
 
     record = _base_record(finding_ref)
     record["truncated"] = was_truncated
     record["severity"] = severity
+    record["target"] = target
+    record["state"] = state
 
     try:
         answers = response.get("answers", {})

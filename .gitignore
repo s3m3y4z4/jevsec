@@ -6,3 +6,4 @@ dist/
 *.egg-info/
 results/sessions/
 results/*.log
+config/actions.toml

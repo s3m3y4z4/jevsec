@@ -1,6 +1,6 @@
 # JEVSEC
 
-Active decision-support tooling for authorized penetration testing and CTFs, built on local System One models (reflex, decider). Everything runs on your machine; no engagement data leaves it unless you explicitly configure a remote decision backend.
+Active decision-support tooling for authorized penetration testing and CTFs, built on local System One-compatible decision engines. Everything runs on your machine; no engagement data leaves it unless you explicitly configure a remote decision backend.
 
 JEVSEC is a **decision and triage layer**: it orders queues and explains every judgment. It never executes commands, never touches your targets, and never replaces your judgment — under the confidence threshold, or on any error, a human reviews.
 
@@ -30,7 +30,7 @@ PYTHONPATH=src python3 -m jevsec triage \
 
 Expected outcome: one triaged record per input line on stdout, a readable queue on stderr ordered by priority, exit code 0 — the whole run completes in seconds. From clone to last record this path is designed to stay under five minutes on a clean machine.
 
-To use real engines (decider-2b on a CUDA GPU with ≥ 8 GB VRAM), see [Real engines on your own hardware](#real-engines-on-your-own-hardware) below.
+To use a real engine (decider-2b on a CUDA GPU with ≥ 8 GB VRAM), see [Real engines on your own hardware](#real-engines-on-your-own-hardware) below — or point `base_url` at any System One-compatible backend you already run.
 
 ## The full cycle, with or without an AI agent
 
@@ -54,6 +54,19 @@ claude mcp add jevsec --env PYTHONPATH=$PWD/src -- python3 -m jevsec.mcp_adapter
 ```
 
 During an engagement you will tell your agent "pass this finding to jevsec and show me the queue" or "what does jevsec advise now?": it will use the tools, not memorized commands.
+
+## Assisted execution (off by default)
+
+For every record at the top of a queue, JEVSEC can propose the next operational step as **copyable text** — built by the code from templates you declare in `config/actions.toml` (one per triage bucket, one per winning rule), never by the model.
+
+Optionally, the daemon can also **run** a proposed command — under four hard rules:
+
+1. **Per-action human confirmation**: every single execution asks first; in the CLI it is an interactive prompt, in the console a two-step button. No TTY, no execution.
+2. **Templates only, never free text**: the command is rebuilt from the declared template and the record's fields; the client's confirmation can only match the rebuilt command or be refused.
+3. **Allowlist and scope**: a tool must be in your `[allowlist]` (empty by default: execution stays disabled) and every target must be inside your declared `[scope]`.
+4. **Always audited**: every executed action writes a line to the session's `actions.jsonl` before the daemon answers.
+
+There is **no autonomous execution** and no execution driven by a confidence threshold. See `SECURITY.md`.
 
 ## What the model is asked, and what it is not
 
@@ -136,8 +149,6 @@ Measured setup (numbers, not marketing — constitution: measure, don't assume):
 | CUDA / driver | CUDA 12.6 wheel index, driver 550.x |
 | Python for the engine venv | 3.12 (`uv`) |
 | VRAM behavior | decider-2b fits in 8 GB **only** with reduced CUDA-graph buckets (`DECIDER_T_BUCKETS=256,1024 DECIDER_B_BUCKETS=1,4`, already set by the script); the default grid OOMs on 8 GB |
-| Engine co-residency | the two engines do **not** co-reside in 8 GB VRAM — run one at a time |
-| reflex 4B | 8.4 GB bf16: needs partial offload on 8 GB (`REFLEX_MAX_MEMORY`, see `setup/setup_reflex.sh`); the 2B backbone is the no-patch alternative |
 
 Install and verify with a real question (never a bare ping):
 
@@ -153,7 +164,6 @@ The triage itself is the health check: every record with a verdict proves the ba
 JEVSEC ships **no model weights**. The `setup/` scripts clone and download third-party components, each under its own license — check the upstream pages before redistribution:
 
 - [`Mapika/decider`](https://github.com/Mapika/decider) — decision engine code, Apache-2.0; weights `Mapika/decider-2b` from Hugging Face under the license on the model card.
-- [`reflex`](https://github.com/kshetrajna12/reflex) — reflex engine, MIT (© 2026 Kshetrajna Raghavan); serves a `Qwen/Qwen3.5` backbone under its own upstream license (see the model pages).
 - [`autotrust/JEV`](https://huggingface.co/autotrust/JEV) — an independent Apache-2.0 open-weights student of the System One class, usable as an alternative backend on machines with larger VRAM (~20 GB for the 9B); same wire schema.
 
 The System One model class and the Jev name belong to TypeSafe AI; JEVSEC is an independent tool and is not affiliated with or endorsed by them.

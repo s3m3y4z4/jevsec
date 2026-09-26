@@ -49,6 +49,14 @@
   .ingest-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; padding: 12px; }
   @media (max-width: 900px) { .ingest-grid { grid-template-columns: 1fr; } }
   .empty { color: var(--dim); padding: 12px; }
+  .playbook { margin: 6px 0; padding: 8px; border: 1px dashed var(--line); border-radius: 6px; }
+  .playbook .label { color: var(--dim); font-size: 11px; text-transform: uppercase; letter-spacing: .06em; }
+  .playbook pre { margin: 4px 0 0; }
+  .playbook .run-zone { margin-top: 6px; }
+  .playbook .run-zone button { background: var(--warn); color: #101418; border: 0;
+    border-radius: 4px; padding: 4px 12px; font: inherit; cursor: pointer; }
+  .playbook .run-zone .armed { background: var(--bad); color: #fff; }
+  .playbook .run-zone pre.action-out { margin-top: 6px; white-space: pre-wrap; }
   footer { color: var(--dim); font-size: 11px; padding: 0 16px 16px; }
 </style>
 </head>
@@ -92,8 +100,12 @@
     <h2>prioritize — observations per objective</h2>
     <div id="prioritize-body"><div class="empty">no session</div></div>
   </section>
+  <section id="audit-section">
+    <h2>actions — audit log</h2>
+    <div id="audit-body"><div class="empty">no session</div></div>
+  </section>
 </main>
-<footer>configs live in git: config/live-triage.toml · config/prioritization.toml — this console reads the queues and sends only what you submit.</footer>
+<footer id="footer">configs live in git: config/live-triage.toml · config/prioritization.toml — this console reads the queues and sends only what you submit. Assisted execution: template commands only, per-action confirmation, always audited.</footer>
 <script>
 "use strict";
 const REFRESH_MS = 2000;
@@ -116,6 +128,57 @@ async function jfetch(url, options) {
 
 function fmtProb(p) { return p === null || p === undefined ? "–" : p.toFixed(2); }
 
+function playbookBlock(record) {
+  const pb = record.playbook;
+  if (!pb) return '';
+  const body = pb.argv
+    ? `<pre>${pb.argv.join(" ").replace(/</g, "&lt;")}</pre>
+       <div class="run-zone" data-ref="${record.finding_ref ?? record.obs_ref}" data-template="${pb.template}"
+            data-argv="${JSON.stringify(pb.argv).replace(/"/g, "&quot;")}">
+         <button hidden></button><span class="done" hidden></span><pre class="action-out" hidden></pre></div>`
+    : `<div class="preview">${pb.suggestion}</div>`;
+  return `<div class="playbook"><span class="label">next step — ${pb.description}</span>${body}</div>`;
+}
+
+function bindRunZones() {
+  document.querySelectorAll(".run-zone[data-ref]").forEach((zone) => {
+    if (zone.dataset.bound) return;
+    zone.dataset.bound = "1";
+    const button = zone.querySelector("button");
+    const done = zone.querySelector(".done");
+    const out = zone.querySelector(".action-out");
+    const argv = JSON.parse(zone.dataset.argv);
+    fetch("/api/status").then((r) => r.json()).then((status) => {
+      zone.dataset.enabled = status.actions?.enabled === true ? "1" : "";
+    }).catch(() => {});
+    button.hidden = false;
+    button.textContent = "run…";
+    button.addEventListener("click", async () => {
+      if (!button.classList.contains("armed")) {          // step 1: mostra l'azione esatta
+        button.classList.add("armed");
+        button.textContent = `execute: ${argv.join(" ")} ?`;
+        return;
+      }
+      button.disabled = true;                             // step 2: conferma per-azione
+      try {
+        const result = await jfetch(`/api/sessions/${current}/actions`, {
+          method: "POST",
+          body: JSON.stringify({ ref: zone.dataset.ref, template: zone.dataset.template, confirm: argv }),
+        });
+        out.hidden = false;
+        out.textContent = `exit ${result.exit_code} in ${result.duration_ms} ms\n${result.stdout || result.stderr || ""}`;
+        done.hidden = false; done.textContent = "audited";
+      } catch (error) {
+        out.hidden = false;
+        out.textContent = `refused: ${error.message}`;
+      }
+      button.classList.remove("armed");
+      button.textContent = "run…";
+      button.disabled = false;
+    });
+  });
+}
+
 function parseJsonl(text) {
   const lines = text.split("\n").map((l) => l.trim()).filter(Boolean);
   return lines.map((line) => JSON.parse(line));
@@ -133,6 +196,7 @@ function triageRow(record) {
     <td>${record.finding_ref}${record.error ? ` <span class="err">${record.error}</span>` : ""}</td>
   </tr>
   <tr><td colspan="6" style="padding:0"><details><summary>detail ${record.finding_ref}</summary>
+    ${playbookBlock(record)}
     <pre>${JSON.stringify(record, null, 2).replace(/</g, "&lt;")}</pre>
   </details></td></tr>`;
 }
@@ -166,6 +230,7 @@ function impactRow(record, objective) {
   </tr>
   <tr><td colspan="5" style="padding:0"><details class="impact-detail" data-key="${key}">
     <summary>detail ${record.obs_ref}</summary>
+    ${playbookBlock(record)}
     <pre class="obs-text" hidden></pre>
     <pre>${JSON.stringify(record, null, 2).replace(/</g, "&lt;")}</pre>${feedbackForm}
   </details></td></tr>`;
@@ -227,6 +292,7 @@ function renderQueue(queue) {
   }
   baselineDone = true;
   bindFeedbackForms();
+  bindRunZones();
 }
 
 function markDone(form, message) {
@@ -330,6 +396,14 @@ async function refresh() {
   } catch (error) {
     $("triage-body").innerHTML = `<div class="empty err">${error.message}</div>`;
   }
+  try {
+    const audit = await jfetch(`/api/sessions/${current}/actions`);
+    $("audit-body").innerHTML = audit.length
+      ? `<table><tr><th>ts</th><th>ref</th><th>command</th><th>exit</th></tr>` +
+        audit.map((a) => `<tr><td>${a.ts}</td><td>${a.ref}</td><td>${a.argv.join(" ").replace(/</g, "&lt;")}</td>` +
+          `<td>${a.exit_code ?? "timeout"}</td></tr>`).join("") + "</table>"
+      : '<div class="empty">no actions executed</div>';
+  } catch { $("audit-body").innerHTML = '<div class="empty">audit unavailable</div>'; }
 }
 
 function resetSessionView() {

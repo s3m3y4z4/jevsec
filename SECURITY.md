@@ -2,14 +2,14 @@
 
 ## What this software is
 
-JEVSEC is a decision-support layer for authorized security testing. It sorts queues and explains its judgments; it never executes commands and never sends traffic to your targets. It is not a scanner, not an exploitation framework, and not a substitute for operator judgment.
+JEVSEC is a decision-support layer for authorized security testing. It sorts queues and explains its judgments; it never executes anything autonomously and never sends traffic to your targets on its own. It is not a scanner, not an exploitation framework, and not a substitute for operator judgment. An optional **assisted execution** mode exists (off by default): it runs only template-built commands, only after an explicit per-action human confirmation, only for allowlisted tools against declared in-scope targets, and always with a per-action audit log.
 
 ## Threat model
 
 The core input is **hostile by construction**: finding bodies and observation text can contain anything an attacker put in a response — banners, payloads, injected instructions. JEVSEC treats every byte of target-controlled text as untrusted input:
 
 - **Redaction before judgment**: hex blobs ≥ 16 characters and base64-like blobs ≥ 24 characters are replaced by placeholders before any model sees the text; bodies are truncated at a configured limit. The model judges words, not artifacts.
-- **The model never acts**: its output is a probability on an atomic question. Recombination into impact scores, gates and queue order happens in code. Nothing is executed as a consequence of a judgment.
+- **The model never acts**: its output is a probability on an atomic question. Recombination into impact scores, gates and queue order happens in code. No judgment ever triggers an execution: a command runs only when a human confirms it, and only if it matches a declared template (see assisted execution in the README).
 - **The operator is always in the loop**: below the confidence threshold, or on any error, records go to human review. Records are never silently discarded, and errors never auto-approve.
 
 ## Known limitation: prompt injection moves the model (auto gate disabled)
