@@ -291,7 +291,7 @@
         </div>
       </div>
       <ul class="facts">
-        <li><b>0.79</b> held-out accuracy, majority baseline 0.56</li>
+        <li><b>0.81</b> held-out accuracy, majority baseline 0.56</li>
         <li><b>170+</b> automated tests</li>
         <li><b>0</b> dependencies — Python stdlib</li>
         <li><b>Apache-2.0</b></li>
@@ -411,12 +411,12 @@
             in, probabilities out.
           </p>
           <p>
-            Our documented backend is <a href="https://huggingface.co/dr3x1/jevsec-002">jevsec-002</a>
-            — a LoRA fine-tune of XHToken/Spark-X2.5-4B (Apache-2.0), trained on a private,
-            de-identified dataset of 254 security observations with human-verified labels: where the
-            operator’s verdict disagreed with the model, the operator’s verdict won. One Q8_0 GGUF,
-            one forward pass per question set, zero generated tokens; it runs on a single
-            consumer GPU (8&nbsp;GB VRAM is enough for Q8_0).
+            Our documented backend is <a href="https://huggingface.co/dr3x1/jevsec-002">jevsec-003</a>
+            (third iteration, same Hugging Face repo) — a LoRA fine-tune of XHToken/Spark-X2.5-4B
+            (Apache-2.0), trained on a private, de-identified dataset of 317 security observations
+            with human-verified labels: where the operator’s verdict disagreed with the model, the
+            operator’s verdict won. One Q8_0 GGUF, one forward pass per question set, zero
+            generated tokens; it runs on a single consumer GPU (8&nbsp;GB VRAM is enough for Q8_0).
           </p>
           <p>What it is not — the same limits are declared on the model card:</p>
           <ul class="limits">
@@ -427,12 +427,12 @@
         </div>
         <div>
           <div class="measures">
-            <div class="m-head">jevsec-002 — held-out dev set</div>
+            <div class="m-head">jevsec-003 — held-out dev set</div>
             <table>
-              <tr><td>decision accuracy</td><td>0.79</td></tr>
+              <tr><td>decision accuracy</td><td>0.81</td></tr>
               <tr><td>majority-class baseline</td><td>0.56</td></tr>
-              <tr><td>training observations</td><td>254</td></tr>
-              <tr><td>operator verdicts absorbed</td><td>43</td></tr>
+              <tr><td>training observations</td><td>317</td></tr>
+              <tr><td>operator verdicts absorbed</td><td>68</td></tr>
             </table>
             <div class="src-note">as published on the model card · huggingface.co/dr3x1/jevsec-002</div>
           </div>

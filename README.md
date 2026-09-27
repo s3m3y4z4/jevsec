@@ -32,7 +32,7 @@ PYTHONPATH=src python3 -m jevsec triage \
 
 Expected outcome: one triaged record per input line on stdout, a readable queue on stderr ordered by priority, exit code 0 — the whole run completes in seconds. From clone to last record this path is designed to stay under five minutes on a clean machine.
 
-To use a real engine, see [Real engines on your own hardware](#real-engines-on-your-own-hardware) below — or point `base_url` at any System One-compatible backend you already run. We also publish [**jevsec-002**](https://huggingface.co/dr3x1/jevsec-002), a fine-tuned decision model for security triage (GGUF, Apache-2.0): serve it with any System One-compatible llama.cpp runtime and point `base_url` there.
+To use a real engine, see [Real engines on your own hardware](#real-engines-on-your-own-hardware) below — or point `base_url` at any System One-compatible backend you already run. We also publish [**jevsec-003**](https://huggingface.co/dr3x1/jevsec-002) (third iteration, same repo), a fine-tuned decision model for security triage (GGUF, Apache-2.0): serve it with any System One-compatible llama.cpp runtime and point `base_url` there.
 
 ## The full cycle, with or without an AI agent
 
@@ -163,7 +163,12 @@ The triage itself is the health check: every record with a verdict proves the ba
 
 ## Engine attribution
 
-This repository ships **no model weights**: engines are downloaded or served separately. **Our own fine-tuned decision model** — [jevsec-002](https://huggingface.co/dr3x1/jevsec-002), Apache-2.0, a LoRA fine-tune of XHToken/Spark-X2.5-4B (Apache-2.0) trained on human-verified security labels — is published on Hugging Face and is the documented backend. Third-party alternatives, each under its own license — check the upstream pages before redistribution:
+This repository ships **no model weights**: engines are downloaded or served separately. **Our own fine-tuned decision model** — [jevsec-003](https://huggingface.co/dr3x1/jevsec-002) (third iteration, same Hugging Face repo), Apache-2.0, a LoRA fine-tune of XHToken/Spark-X2.5-4B (Apache-2.0) — is published on Hugging Face and is the documented backend: trained on 317 de-identified observations with 68 human-verified operator verdicts, 0.81 held-out decision accuracy (majority baseline ~0.56), 0.79 on prioritization. Training curves:
+
+![training loss](docs/assets/training-loss.png)
+![dev-set accuracy](docs/assets/training-accuracy.png)
+
+Third-party alternatives, each under its own license — check the upstream pages before redistribution:
 
 - [`Mapika/decider`](https://github.com/Mapika/decider) — decision engine code, Apache-2.0; weights `Mapika/decider-2b` from Hugging Face under the license on the model card.
 - [`autotrust/JEV`](https://huggingface.co/autotrust/JEV) — an independent Apache-2.0 open-weights student of the System One class, usable as an alternative backend on machines with larger VRAM (~20 GB for the 9B); same wire schema.
