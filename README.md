@@ -161,7 +161,7 @@ The triage itself is the health check: every record with a verdict proves the ba
 
 ## Engine attribution
 
-JEVSEC ships **no model weights**. The `setup/` scripts clone and download third-party components, each under its own license — check the upstream pages before redistribution:
+This repository ships **no model weights**: engines are downloaded or served separately. **Our own fine-tuned decision model** — [jevsec-002](https://huggingface.co/dr3x1/jevsec-002), Apache-2.0, a LoRA fine-tune of XHToken/Spark-X2.5-4B (Apache-2.0) trained on human-verified security labels — is published on Hugging Face and is the documented backend. Third-party alternatives, each under its own license — check the upstream pages before redistribution:
 
 - [`Mapika/decider`](https://github.com/Mapika/decider) — decision engine code, Apache-2.0; weights `Mapika/decider-2b` from Hugging Face under the license on the model card.
 - [`autotrust/JEV`](https://huggingface.co/autotrust/JEV) — an independent Apache-2.0 open-weights student of the System One class, usable as an alternative backend on machines with larger VRAM (~20 GB for the 9B); same wire schema.
