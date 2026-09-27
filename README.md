@@ -32,7 +32,7 @@ PYTHONPATH=src python3 -m jevsec triage \
 
 Expected outcome: one triaged record per input line on stdout, a readable queue on stderr ordered by priority, exit code 0 — the whole run completes in seconds. From clone to last record this path is designed to stay under five minutes on a clean machine.
 
-To use a real engine, see [Real engines on your own hardware](#real-engines-on-your-own-hardware) below — or point `base_url` at any System One-compatible backend you already run. We also publish [**jevsec-003**](https://huggingface.co/dr3x1/jevsec) (third iteration, same repo), a fine-tuned decision model for security triage (GGUF, Apache-2.0): serve it with any System One-compatible llama.cpp runtime and point `base_url` there.
+To use a real engine, see [Real engines on your own hardware](#real-engines-on-your-own-hardware) below — or point `base_url` at any System One-compatible backend you already run. We also publish [**jevsec-003**](https://huggingface.co/dr3x1/jevsec) (third iteration), a fine-tuned decision model for security triage (GGUF, Apache-2.0): serve it with any System One-compatible llama.cpp runtime and point `base_url` there.
 
 ## The full cycle, with or without an AI agent
 
@@ -113,6 +113,10 @@ Apache-2.0 — see `LICENSE`. Decision engines and every third-party component d
 type = "noul"
 instructions = "The observation mentions an outbound channel usable to move data out."
 
+[objectives.exfil_path.questions.q_reachable]
+type = "noul"
+instructions = "The described channel can actually be reached from the current position, as stated in the text."
+
 [[objectives.exfil_path.rules]]
 name = "exfil_ready"
 score = 3
@@ -163,7 +167,7 @@ The triage itself is the health check: every record with a verdict proves the ba
 
 ## Serving your own engine
 
-The documented backend is decider-2b, but JEVSEC speaks a plain HTTP contract: any local server exposing the same decision endpoint works as `base_url`. If you maintain your own fine-tuned engine, serve it and point the config there — no code changes needed:
+The install script sets up decider-2b, but any local server exposing the same decision endpoint works as `base_url` — including our own fine-tuned model published below. Serve your engine and point the config there, no code changes needed:
 
 1. Serve your engine on loopback with an HTTP endpoint compatible with the System One decision contract (JSON in, per-question answers with probabilities out).
 2. Set `base_url` in `config/live-triage.toml` and `config/prioritization.toml` to your engine's address.
@@ -176,7 +180,7 @@ Two things to know before relying on your own engine:
 
 ## Engine attribution
 
-This repository ships **no model weights**: engines are downloaded or served separately. **Our own fine-tuned decision model** — [jevsec-003](https://huggingface.co/dr3x1/jevsec) (third iteration, same Hugging Face repo), Apache-2.0, a LoRA fine-tune of XHToken/Spark-X2.5-4B (Apache-2.0) — is published on Hugging Face and is the documented backend: trained on 317 de-identified observations with 68 human-verified operator verdicts, 0.81 held-out decision accuracy (majority baseline ~0.56), 0.79 on prioritization. Training curves:
+This repository ships **no model weights**: engines are downloaded or served separately. **Our own fine-tuned decision model** — [jevsec-003](https://huggingface.co/dr3x1/jevsec) (third iteration), Apache-2.0, a LoRA fine-tune of XHToken/Spark-X2.5-4B (Apache-2.0) — is published on Hugging Face and is the backend we run and publish: trained on 317 de-identified observations with 68 human-verified operator verdicts, 0.81 held-out decision accuracy (majority baseline ~0.56), 0.79 on prioritization. Training curves:
 
 ![training loss](docs/assets/training-loss.png)
 ![dev-set accuracy](docs/assets/training-accuracy.png)

@@ -8,7 +8,7 @@ Notable, user-visible changes per version. Dates are ISO-8601.
 - **Assisted execution (off by default)**: the daemon can run a proposed command only under four hard rules — per-action human confirmation (interactive prompt / two-step button; no TTY, no execution), template-only commands (the client's confirmation must match the rebuilt command or it is refused), allowlisted tools and declared target scope, and a per-action audit log (`actions.jsonl`) written before the daemon answers. No autonomous execution exists.
 - **CLI**: `jevsec session run` (shows the exact command, asks confirmation) and `jevsec session actions` (audit log).
 - **Channel**: requests to the decision backend now carry the `model` field (`[backend] model`, default `jev-latest`), as in the original System One wire contract.
-- **Documentation**: the `reflex` engine and its setup script are gone; the documented open engine is decider-2b, and any System One-compatible backend can be used via `base_url`.
+- **Documentation**: the `reflex` engine and its setup script are gone; the installable open engine is decider-2b, and any System One-compatible backend can be used via `base_url`.
 - **Constitution-level guarantee unchanged**: the auto gate stays disabled; no threshold drives any action.
 
 ## 0.1 — first public release
