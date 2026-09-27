@@ -161,6 +161,19 @@ PYTHONPATH=src python3 -m jevsec triage --input data/samples/live_triage_finding
 
 The triage itself is the health check: every record with a verdict proves the backend answered. The script binds loopback by default; to share the engine across machines see the remote backend section, and put TLS in front before you do.
 
+## Serving your own engine
+
+The documented backend is decider-2b, but JEVSEC speaks a plain HTTP contract: any local server exposing the same decision endpoint works as `base_url`. If you maintain your own fine-tuned engine, serve it and point the config there — no code changes needed:
+
+1. Serve your engine on loopback with an HTTP endpoint compatible with the System One decision contract (JSON in, per-question answers with probabilities out).
+2. Set `base_url` in `config/live-triage.toml` and `config/prioritization.toml` to your engine's address.
+3. Restart the daemon: `python3 -m jevsec.service`.
+
+Two things to know before relying on your own engine:
+
+- **Calibration matters.** Thresholds in this repo are calibrated against our own models and labeled data. A different engine produces a different probability scale: re-derive thresholds on your own data before trusting any gate, and keep the automatic gate disabled until then.
+- **The channel is the contract.** Your engine receives the same redacted state a documented engine would: no raw engagement text ever leaves the redaction layer.
+
 ## Engine attribution
 
 This repository ships **no model weights**: engines are downloaded or served separately. **Our own fine-tuned decision model** — [jevsec-003](https://huggingface.co/dr3x1/jevsec-002) (third iteration, same Hugging Face repo), Apache-2.0, a LoRA fine-tune of XHToken/Spark-X2.5-4B (Apache-2.0) — is published on Hugging Face and is the documented backend: trained on 317 de-identified observations with 68 human-verified operator verdicts, 0.81 held-out decision accuracy (majority baseline ~0.56), 0.79 on prioritization. Training curves:
