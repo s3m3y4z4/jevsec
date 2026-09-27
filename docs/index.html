@@ -1,0 +1,579 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>JEVSEC — decision support for authorized security work</title>
+<meta name="description" content="A local decision layer for authorized penetration testing and CTF work: findings and observations in, an explained and ordered queue out. It never touches your targets, and it never decides for you.">
+<meta property="og:title" content="JEVSEC — decision support for authorized security work">
+<meta property="og:description" content="Scanner findings in, an explained queue out. Local by default, always gated, no autonomous execution.">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%23101418'/%3E%3Cpath d='M9 9h14v4H13v6h8v4H9z' fill='%2362b0e3'/%3E%3C/svg%3E">
+<style>
+  @font-face {
+    font-family: "Source Serif 4";
+    src: url("fonts/source-serif-4-var.woff2") format("woff2-variations");
+    font-weight: 400 700;
+    font-stretch: 100%;
+    font-style: normal;
+    font-display: swap;
+  }
+  :root {
+    --bg: #101418;
+    --bg-deep: #0b0f12;
+    --panel: #171d24;
+    --line: #26303a;
+    --text: #ccd6e0;
+    --bright: #e3ebf3;
+    --dim: #7d8b99;
+    --accent: #62b0e3;
+    --ok: #4cc38a;
+    --warn: #d9a441;
+    --bad: #e5546b;
+    --serif: "Source Serif 4", Georgia, "Times New Roman", serif;
+    --sans: -apple-system, BlinkMacSystemFont, "Segoe UI", Ubuntu, "Noto Sans", Arial, sans-serif;
+    --mono: ui-monospace, "SF Mono", "Cascadia Code", "JetBrains Mono", Menlo, Consolas, "DejaVu Sans Mono", monospace;
+  }
+  * { box-sizing: border-box; }
+  html { scroll-behavior: smooth; }
+  @media (prefers-reduced-motion: reduce) {
+    html { scroll-behavior: auto; }
+    *, *::before, *::after { transition: none !important; }
+  }
+  body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--text);
+    font: 16px/1.66 var(--sans);
+    -webkit-font-smoothing: antialiased;
+    text-rendering: optimizeLegibility;
+  }
+  a { color: var(--accent); text-decoration: none; }
+  a:hover { text-decoration: underline; text-underline-offset: 3px; }
+  :focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; border-radius: 2px; }
+  code { font-family: var(--mono); font-size: .92em; }
+  .wrap { max-width: 70rem; margin: 0 auto; padding: 0 clamp(1.2rem, 4vw, 3rem); }
+
+  /* ---------- top bar ---------- */
+  .topbar {
+    font: 13px/1.4 var(--mono);
+    color: var(--dim);
+    border-bottom: 1px solid var(--line);
+    background: color-mix(in srgb, var(--bg-deep) 88%, transparent);
+    backdrop-filter: blur(8px);
+    position: sticky; top: 0; z-index: 10;
+  }
+  .topbar .wrap { display: flex; gap: 1.6rem; align-items: baseline; padding-top: .85rem; padding-bottom: .85rem; flex-wrap: wrap; }
+  .topbar .brand { color: var(--accent); font-weight: 700; letter-spacing: .03em; }
+  .topbar nav { margin-left: auto; display: flex; gap: 1.4rem; flex-wrap: wrap; }
+
+  /* ---------- hero ---------- */
+  .hero { padding: clamp(3.2rem, 8vh, 5.8rem) 0 3.4rem; }
+  .hero-grid { display: grid; grid-template-columns: minmax(0, 7fr) minmax(0, 6fr); gap: clamp(2rem, 5vw, 4.5rem); align-items: start; }
+  h1 {
+    font-family: var(--serif);
+    font-size: clamp(2.5rem, 5.4vw, 4rem);
+    line-height: 1.08;
+    font-weight: 600;
+    letter-spacing: -0.014em;
+    margin: 0 0 1.3rem;
+    color: var(--bright);
+  }
+  .hero .lede {
+    font-family: var(--serif);
+    font-size: 1.16rem;
+    line-height: 1.6;
+    max-width: 56ch;
+    margin: 0 0 1.9rem;
+    color: var(--text);
+  }
+  .hero .lede strong { color: var(--bright); font-weight: 600; }
+
+  .actions { display: grid; gap: .8rem; max-width: 34rem; }
+  .clone { font: 14px/1.6 var(--mono); }
+  .clone .cmd {
+    display: flex; align-items: center; gap: .8rem;
+    background: var(--panel); border: 1px solid var(--line); border-radius: 8px;
+    padding: .7rem 1rem; color: var(--text);
+  }
+  .clone .cmd code { overflow-x: auto; white-space: nowrap; }
+  .clone button {
+    font: 12px/1 var(--mono); color: var(--dim); background: none;
+    border: 1px solid var(--line); border-radius: 5px;
+    padding: .4rem .6rem; cursor: pointer; flex: none;
+  }
+  .clone button:hover { color: var(--accent); border-color: var(--accent); }
+  .hf-link {
+    display: flex; align-items: baseline; gap: .7rem; flex-wrap: wrap;
+    font: 13.5px/1.5 var(--mono);
+    border: 1px solid var(--line); border-radius: 8px;
+    padding: .65rem 1rem; background: var(--panel);
+  }
+  .hf-link .tag { color: var(--warn); font-size: 11.5px; letter-spacing: .02em; }
+  .hf-link a { color: var(--bright); }
+  .hf-link a:hover { color: var(--accent); }
+  .facts {
+    display: flex; flex-wrap: wrap; gap: .4rem 1.6rem;
+    font: 12.5px/1.7 var(--mono); color: var(--dim);
+    margin: 1.4rem 0 0; padding: 0; list-style: none;
+  }
+  .facts b { color: var(--text); font-weight: 600; font-variant-numeric: tabular-nums; }
+
+  /* ---------- the queue (hero artifact) ---------- */
+  .queue { border: 1px solid var(--line); border-radius: 8px; background: var(--panel); overflow: hidden; }
+  .queue-head {
+    display: flex; align-items: baseline; gap: .9rem;
+    padding: .65rem 1rem; border-bottom: 1px solid var(--line);
+    font: 12px/1.4 var(--mono); color: var(--dim);
+  }
+  .queue-head .src { color: var(--ok); }
+  .queue-head .n { margin-left: auto; }
+  details.rec { border-bottom: 1px solid var(--line); }
+  details.rec:last-of-type { border-bottom: 0; }
+  details.rec > summary {
+    list-style: none; cursor: pointer;
+    display: grid; grid-template-columns: 2.1rem 1fr auto; gap: .15rem 1rem;
+    padding: .85rem 1rem; align-items: baseline;
+    transition: background .15s ease;
+  }
+  details.rec > summary::-webkit-details-marker { display: none; }
+  details.rec > summary:hover { background: rgba(98, 176, 227, .06); }
+  details.rec[open] > summary { background: rgba(98, 176, 227, .08); border-bottom: 1px dashed var(--line); }
+  .rec .pos { font: 13px/1.5 var(--mono); color: var(--dim); }
+  .rec .tid { font: 14px/1.5 var(--mono); color: var(--text); overflow-wrap: anywhere; }
+  .rec .sev { font: 11px/1.5 var(--mono); padding: 0 .5rem; border-radius: 999px; border: 1px solid var(--line); justify-self: start; margin-top: .25rem; }
+  .sev.critical { color: var(--bad); border-color: var(--bad); }
+  .sev.high { color: var(--warn); border-color: var(--warn); }
+  .sev.medium { color: var(--accent); border-color: var(--accent); }
+  .gate {
+    font: 11px/1.6 var(--mono); color: var(--warn);
+    border: 1px solid var(--warn); border-radius: 4px; padding: 0 .45rem;
+    grid-row: span 2; align-self: start; margin-top: .15rem;
+  }
+  .rec-body { padding: 1rem 1rem 1.2rem 4.1rem; font: 13px/1.68 var(--mono); }
+  .rec-body .step { color: var(--dim); margin-bottom: .4rem; }
+  .rec-body .pair { display: flex; gap: .8rem; margin-bottom: .3rem; }
+  .rec-body .pair .q { color: var(--text); min-width: 0; }
+  .rec-body .pair .p { margin-left: auto; color: var(--dim); white-space: nowrap; font-variant-numeric: tabular-nums; }
+  .p.hi { color: var(--ok); } .p.mid { color: var(--warn); }
+  .rec-body .verdict { margin: .6rem 0 0; padding: .5rem .8rem; border-left: 2px solid var(--line); color: var(--dim); }
+  .rec-body .verdict b { color: var(--text); font-weight: 600; }
+  .rec-body .redacted { color: var(--warn); }
+  .queue-foot { padding: .6rem 1rem; font: 11.5px/1.5 var(--mono); color: var(--dim); border-top: 1px solid var(--line); }
+  .queue-foot .warn { color: var(--warn); }
+  .hint { font: 12px/1.5 var(--mono); color: var(--dim); margin: .7rem 0 0; }
+
+  /* ---------- sections ---------- */
+  section.block { padding: clamp(2.8rem, 6.5vh, 4.6rem) 0; border-top: 1px solid var(--line); }
+  h2 {
+    font-family: var(--serif);
+    font-size: clamp(1.65rem, 3vw, 2.15rem); font-weight: 600; line-height: 1.18;
+    margin: 0 0 1rem; color: var(--bright); letter-spacing: -0.01em;
+  }
+  section.block p { margin: 0 0 1.05rem; max-width: 68ch; }
+
+  /* pipeline */
+  .pipeline { margin: 1.8rem 0 0; padding: 0; list-style: none; counter-reset: step; }
+  .pipeline li {
+    counter-increment: step; position: relative;
+    display: grid; grid-template-columns: 3rem 1fr; gap: 1.2rem;
+    padding: 1.05rem 0; border-top: 1px solid var(--line);
+  }
+  .pipeline li::before {
+    content: counter(step, decimal-leading-zero);
+    font: 15px/1.7 var(--mono); color: var(--accent); font-variant-numeric: tabular-nums;
+  }
+  .pipeline b { color: var(--bright); font-weight: 650; }
+  .pipeline .ex { font: 13px/1.6 var(--mono); color: var(--dim); margin-top: .35rem; overflow-wrap: anywhere; }
+  .pipeline .ex .redacted { color: var(--warn); }
+
+  /* engine / measures */
+  .engine-grid { display: grid; grid-template-columns: minmax(0, 7fr) minmax(0, 5fr); gap: clamp(1.6rem, 4vw, 3.2rem); margin-top: 1.4rem; align-items: start; }
+  .measures { border: 1px solid var(--line); border-radius: 8px; background: var(--panel); overflow: hidden; }
+  .measures .m-head { padding: .6rem 1rem; border-bottom: 1px solid var(--line); font: 12px/1.4 var(--mono); color: var(--dim); }
+  .measures table { width: 100%; border-collapse: collapse; font: 13px/1.55 var(--mono); font-variant-numeric: tabular-nums; }
+  .measures td { padding: .55rem 1rem; border-bottom: 1px solid var(--line); }
+  .measures tr:last-child td { border-bottom: 0; }
+  .measures td:first-child { color: var(--dim); }
+  .measures td:last-child { text-align: right; color: var(--bright); }
+  .measures .src-note { padding: .55rem 1rem; font: 11.5px/1.5 var(--mono); color: var(--dim); border-top: 1px solid var(--line); }
+  .limits { margin: 1.3rem 0 0; padding: 0 0 0 1.1rem; color: var(--dim); max-width: 66ch; }
+  .limits li { margin-bottom: .45rem; }
+  .limits b { color: var(--text); font-weight: 600; }
+
+  /* surfaces */
+  .surfaces { margin: 1.4rem 0 0; }
+  .surfaces > div { display: grid; grid-template-columns: 10.5rem 1fr; gap: 1.4rem; padding: 1.1rem 0; border-top: 1px solid var(--line); }
+  .surfaces dt { font: 14px/1.6 var(--mono); color: var(--accent); }
+  .surfaces dd { margin: 0; }
+  .surfaces dd p { margin: 0; max-width: none; }
+  .surfaces dd .sub { color: var(--dim); font-size: .93rem; margin-top: .3rem; }
+
+  /* boundaries */
+  .boundaries { background: var(--bg-deep); }
+  .clauses { margin: 1.6rem 0 0; }
+  .clause { display: grid; grid-template-columns: 14.5rem 1fr; gap: 1.4rem; padding: 1rem 0; border-top: 1px solid var(--line); }
+  .clause h3 { font: 13.5px/1.65 var(--mono); color: var(--warn); margin: 0; font-weight: 600; }
+  .clause p { margin: 0 0 .3rem; max-width: none; }
+  .clause p:last-child { color: var(--dim); font-size: .94rem; }
+
+  /* quickstart */
+  .terminal { margin: 1.6rem 0 0; border: 1px solid var(--line); border-radius: 8px; background: var(--bg-deep); overflow: hidden; }
+  .terminal .tbar { display: flex; gap: .9rem; padding: .55rem 1rem; border-bottom: 1px solid var(--line); font: 12px/1.4 var(--mono); color: var(--dim); }
+  .terminal pre { margin: 0; padding: 1.1rem 1.2rem 1.25rem; overflow-x: auto; font: 13.5px/1.8 var(--mono); color: var(--text); }
+  .terminal .c { color: var(--dim); }
+  .terminal .k { color: var(--accent); }
+  .qs-note { color: var(--dim); font-size: .95rem; margin-top: 1rem; max-width: 62ch; }
+
+  /* engines */
+  .engines { margin: 1.4rem 0 0; }
+  .engines > div { padding: 1rem 0; border-top: 1px solid var(--line); }
+  .engines .name { font: 14.5px/1.6 var(--mono); }
+  .engines .name a { color: var(--bright); }
+  .engines .name a:hover { color: var(--accent); }
+  .engines p { margin: .3rem 0 0; font-size: .95rem; max-width: none; }
+  .engines .lic { font: 12px/1.5 var(--mono); color: var(--dim); }
+  .independence { margin: 1.8rem 0 0; padding: .9rem 1.2rem; border: 1px dashed var(--line); border-radius: 8px; color: var(--dim); font-size: .93rem; }
+
+  footer {
+    border-top: 1px solid var(--line); background: var(--bg-deep);
+    font: 13px/1.75 var(--mono); color: var(--dim);
+    padding: 2.1rem 0 2.5rem;
+  }
+  footer .cols { display: grid; grid-template-columns: 1fr 1fr; gap: 2rem; }
+  footer p { margin: 0 0 .5rem; }
+
+  @media (max-width: 880px) {
+    .hero-grid { grid-template-columns: 1fr; }
+    .engine-grid { grid-template-columns: 1fr; }
+    .surfaces > div { grid-template-columns: 1fr; gap: .3rem; }
+    .clause { grid-template-columns: 1fr; gap: .3rem; }
+    footer .cols { grid-template-columns: 1fr; }
+    .rec-body { padding-left: 1rem; }
+  }
+</style>
+</head>
+<body>
+
+<div class="topbar">
+  <div class="wrap">
+    <span class="brand">jevsec</span>
+    <nav>
+      <a href="#how">how it judges</a>
+      <a href="#engine">engine</a>
+      <a href="#boundaries">boundaries</a>
+      <a href="#quickstart">quickstart</a>
+      <a href="https://github.com/s3m3y4z4/jevsec">github</a>
+    </nav>
+  </div>
+</div>
+
+<header class="hero">
+  <div class="wrap hero-grid">
+    <div>
+      <h1>The queue is ordered.<br>The judgment is yours.</h1>
+      <p class="lede">
+        JEVSEC is a local decision layer for <strong>authorized</strong> security testing and
+        CTF&nbsp;work. Scanner findings and engagement observations go in; an explained, ordered
+        queue comes out. It sends no traffic to your targets, and it never decides for you —
+        below the confidence threshold, or on any error, a human reviews.
+      </p>
+      <div class="actions">
+        <div class="clone">
+          <div class="cmd">
+            <code id="clone-cmd">git clone https://github.com/s3m3y4z4/jevsec</code>
+            <button type="button" data-copy="clone-cmd" aria-label="copy the clone command">copy</button>
+          </div>
+        </div>
+        <div class="hf-link">
+          <span class="tag">our fine-tuned engine</span>
+          <a href="https://huggingface.co/dr3x1/jevsec-002">jevsec-002 on Hugging Face</a>
+          <span>huggingface.co/dr3x1/jevsec-002</span>
+        </div>
+      </div>
+      <ul class="facts">
+        <li><b>0.79</b> held-out accuracy, majority baseline 0.56</li>
+        <li><b>170+</b> automated tests</li>
+        <li><b>0</b> dependencies — Python stdlib</li>
+        <li><b>Apache-2.0</b></li>
+      </ul>
+    </div>
+
+    <div>
+      <div class="queue" aria-label="example of a triaged queue">
+        <div class="queue-head">
+          <span>queue</span><span class="src">triage</span><span class="n">3 records</span>
+        </div>
+
+        <details class="rec" open>
+          <summary>
+            <span class="pos">01</span>
+            <span class="tid">doc-example-rce-banner</span>
+            <span class="sev critical">critical</span>
+            <span class="gate">review</span>
+          </summary>
+          <div class="rec-body">
+            <p class="step">matched_at http://192.0.2.10:8080/ — the model sees only redacted text:</p>
+            <p class="step">“doc-example/1.0 (build 2026.01) vulnerable-banner RCE marker reflected · extracted: root:/bin/sh match”</p>
+            <div class="pair"><span class="q">is this finding a true positive?</span><span class="p hi">0.86</span></div>
+            <div class="pair"><span class="q">reachable before authentication?</span><span class="p hi">0.79</span></div>
+            <p class="verdict">verdict <b>true_positive</b> — but the auto gate is disabled, so the record stops at review. The tool orders; you confirm and act.</p>
+          </div>
+        </details>
+
+        <details class="rec">
+          <summary>
+            <span class="pos">02</span>
+            <span class="tid">doc-example-version-mismatch</span>
+            <span class="sev high">high</span>
+            <span class="gate">review</span>
+          </summary>
+          <div class="rec-body">
+            <p class="step">the scanner matched a version banner — the model reads the whole body:</p>
+            <div class="pair"><span class="q">is this finding a true positive?</span><span class="p lo">0.11</span></div>
+            <p class="verdict">banner says <b>“Apache/2.4.54 (Debian) patched-version banner”</b> — a patched build. Verdict leans <b>false_positive</b>; severity stays what the scanner said, and the disagreement is visible.</p>
+          </div>
+        </details>
+
+        <details class="rec">
+          <summary>
+            <span class="pos">03</span>
+            <span class="tid">doc-example-blob-config</span>
+            <span class="sev medium">medium</span>
+            <span class="gate">review</span>
+          </summary>
+          <div class="rec-body">
+            <p class="step">before judging, opaque blobs are replaced — this is what reaches the model:</p>
+            <p class="step">“<span class="redacted">[b64:redacted]</span>” instead of a 56-character base64 config blob</p>
+            <div class="pair"><span class="q">is this finding a true positive?</span><span class="p mid">0.42</span></div>
+            <p class="verdict">too little judgeable signal → <b>needs_review</b>. Hex ≥ 16 chars and base64-like ≥ 24 are always redacted; bodies are truncated. The model judges facts, not blobs.</p>
+          </div>
+        </details>
+
+        <div class="queue-foot">auto gate <span class="warn">disabled</span> — every record lands on a human. Open a record to see the judgment chain.</div>
+      </div>
+      <p class="hint">synthetic documentation findings — the runnable path is in the quickstart below</p>
+    </div>
+  </div>
+</header>
+
+<main>
+
+  <section class="block" id="how">
+    <div class="wrap">
+      <h2>How a finding is judged</h2>
+      <p>
+        No prompt engineering against a chat window. Every decision is an <em>atomic question</em>
+        about redacted text, answered with a probability, and recombinated into scores by code you
+        can read.
+      </p>
+      <ol class="pipeline">
+        <li>
+          <div>
+            <b>Redact at the boundary.</b> Hex blobs and base64-like strings are replaced with
+            placeholders, bodies truncated at a configured length.
+            <p class="ex">response_snippet: “archive digest <span class="redacted">[hex:redacted]</span> listed in index”</p>
+          </div>
+        </li>
+        <li>
+          <div>
+            <b>Ask atomic questions only.</b> The model answers typed questions — a verdict, a
+            boolean fact, a choice — never “assess this finding”. It never sees the engagement
+            objective or scenario words: it judges facts.
+            <p class="ex">noul → 0.79 · choice → true_positive 0.86 · score → 0.31</p>
+          </div>
+        </li>
+        <li>
+          <div>
+            <b>Recombine in code.</b> Rubrics live in TOML, not in the model: rules over question
+            thresholds produce a 0–4 impact, with a declared default rule. Incomplete rubrics are
+            rejected at startup.
+            <p class="ex">rules = { q_egress ≥ 0.5, q_reachable ≥ 0.5 } → score 3</p>
+          </div>
+        </li>
+        <li>
+          <div>
+            <b>Gate on doubt.</b> Below the confidence threshold, or on any error, the record goes
+            to human review. Nothing is silently discarded or auto-approved on error.
+          </div>
+        </li>
+      </ol>
+    </div>
+  </section>
+
+  <section class="block" id="engine">
+    <div class="wrap">
+      <h2>The engine we trained — and what we measured</h2>
+      <div class="engine-grid">
+        <div>
+          <p>
+            This repository ships no model weights; any System One-compatible backend works — point
+            <code>base_url</code> at it and JEVSEC speaks the same wire contract: typed questions
+            in, probabilities out.
+          </p>
+          <p>
+            Our documented backend is <a href="https://huggingface.co/dr3x1/jevsec-002">jevsec-002</a>
+            — a LoRA fine-tune of XHToken/Spark-X2.5-4B (Apache-2.0), trained on a private,
+            de-identified dataset of 254 security observations with human-verified labels: where the
+            operator’s verdict disagreed with the model, the operator’s verdict won. One Q8_0 GGUF,
+            one forward pass per question set, zero generated tokens; it runs on a single
+            consumer GPU (8&nbsp;GB VRAM is enough for Q8_0).
+          </p>
+          <p>What it is not — the same limits are declared on the model card:</p>
+          <ul class="limits">
+            <li><b>Probabilities are not calibrated on your domain</b>: temperature scaling on your own labeled data is required before any threshold-based decision.</li>
+            <li><b>Prompt injection moves the model</b>: injected instructions in finding bodies can push probabilities, which is measured, replicable, and exactly why the auto gate ships disabled.</li>
+            <li><b>Small training set</b>: an experiment that learns operator judgment, not a production classifier. Validate on your own material first.</li>
+          </ul>
+        </div>
+        <div>
+          <div class="measures">
+            <div class="m-head">jevsec-002 — held-out dev set</div>
+            <table>
+              <tr><td>decision accuracy</td><td>0.79</td></tr>
+              <tr><td>majority-class baseline</td><td>0.56</td></tr>
+              <tr><td>training observations</td><td>254</td></tr>
+              <tr><td>operator verdicts absorbed</td><td>43</td></tr>
+            </table>
+            <div class="src-note">as published on the model card · huggingface.co/dr3x1/jevsec-002</div>
+          </div>
+          <p class="hint">third-party engines work through the same channel:</p>
+          <div class="engines">
+            <div>
+              <p class="name"><a href="https://github.com/Mapika/decider">decider</a> <span class="lic">code Apache-2.0 · weights per model card</span></p>
+              <p>Third-party decision engine; <code>setup/setup_decider.sh</code> installs it and serves loopback.</p>
+            </div>
+            <div>
+              <p class="name"><a href="https://huggingface.co/autotrust/JEV">JEV</a> <span class="lic">Apache-2.0 open weights</span></p>
+              <p>An independent open-weights student of the same model class; larger VRAM (~20 GB for the 9B), same wire schema.</p>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section class="block">
+    <div class="wrap">
+      <h2>Three surfaces, one daemon</h2>
+      <p>The whole cycle runs without any AI agent — from the CLI and from the browser console, with identical effects. If you drive an agent, six optional MCP tools expose the same API.</p>
+      <dl class="surfaces">
+        <div>
+          <dt>live-triage</dt>
+          <dd>
+            <p>Scanner findings in — one JSON object per line — an ordered <code>TriageRecord</code> queue out, with auto/review gates.</p>
+            <p class="sub">every judgment carries its probability and the question that produced it</p>
+          </dd>
+        </div>
+        <div>
+          <dt>prioritize</dt>
+          <dd>
+            <p>Engagement observations per declared objective — ship <code>domain_admin</code>, <code>user_flag</code>, <code>rce_app</code>, or declare your own in TOML with no code changes.</p>
+            <p class="sub">the model answers atomic questions; the code recombinates them into 0–4 impact</p>
+          </dd>
+        </div>
+        <div>
+          <dt>live-console</dt>
+          <dd>
+            <p>The <code>jevsecd</code> daemon keeps real-time sessions: local API, browser console, optional MCP tools for agents.</p>
+            <p class="sub">sessions persist on disk; a restart loses nothing</p>
+          </dd>
+        </div>
+      </dl>
+    </div>
+  </section>
+
+  <section class="block boundaries" id="boundaries">
+    <div class="wrap">
+      <h2>Boundaries, not features</h2>
+      <p>These are constitutional — written into the project’s constitution, not toggles that ship on.</p>
+      <div class="clauses">
+        <div class="clause">
+          <h3>no autonomous execution</h3>
+          <p>The tool decides and sorts. It launches no commands and sends no traffic to your targets.</p>
+          <p>Optional assisted execution exists, off by default: template-only commands, per-action human confirmation, allowlist and target scope, one audit line per action before the daemon answers.</p>
+        </div>
+        <div class="clause">
+          <h3>local by default</h3>
+          <p>The only network connection is to the decision backend’s <code>base_url</code>.</p>
+          <p>A non-loopback backend is opt-in and requires HTTPS plus a token, or the tool refuses to start. Only redacted judgment text ever travels; the daemon and the console stay on loopback in every configuration.</p>
+        </div>
+        <div class="clause">
+          <h3>always gated</h3>
+          <p>Below threshold, or on any error, a human reviews.</p>
+          <p>Nothing is ever silently discarded or auto-approved on error.</p>
+        </div>
+        <div class="clause">
+          <h3>auto gate stays off</h3>
+          <p>Shipped disabled, on measurement: injections in response bodies can push the model over threshold.</p>
+          <p>The adversarial measurement ships in the repository and is replicable with <code>harness/run_adversarial.py</code>. Auto re-arms only after a certified mitigation or recalibration on real data.</p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section class="block" id="quickstart">
+    <div class="wrap">
+      <h2>Five minutes, no GPU</h2>
+      <p>Linux, Python 3.11+ (tested on 3.13), git. The deterministic development backend is enough to see the whole cycle; a real engine is a base URL away.</p>
+      <div class="terminal">
+        <div class="tbar"><span>bash</span><span>from clone to first triaged queue</span></div>
+        <pre><span class="c"># deterministic dev backend (no GPU, no weights)</span>
+<span class="k">python3</span> harness/mock_systemone.py &amp;
+
+<span class="c"># triage the synthetic sample</span>
+<span class="k">PYTHONPATH=src</span> python3 -m jevsec triage \
+  --input data/samples/live_triage_findings.jsonl \
+  --config config/live-triage.toml \
+  --base-url http://127.0.0.1:8099
+
+<span class="c"># expected: one triaged record per line on stdout,</span>
+<span class="c">#           the ordered queue on stderr, exit 0</span></pre>
+      </div>
+      <p class="qs-note">
+        Then open a session, feed observations, and read the queue — the full cycle also runs from
+        the browser console at <code>127.0.0.1:7860</code>. For a real engine see
+        <a href="#engine">the engine section</a>.
+      </p>
+    </div>
+  </section>
+
+  <section class="block">
+    <div class="wrap">
+      <h2>Read before deploying</h2>
+      <p class="independence" style="margin-top: 0;">
+        The System One model class and the Jev name belong to TypeSafe AI. JEVSEC is an independent
+        tool and is not affiliated with or endorsed by them. Use it on engagements you are
+        authorized to test — the tool sorts and explains; the operator decides.
+      </p>
+    </div>
+  </section>
+
+</main>
+
+<footer>
+  <div class="wrap cols">
+    <div>
+      <p><a href="https://github.com/s3m3y4z4/jevsec">github.com/s3m3y4z4/jevsec</a> · Apache-2.0</p>
+      <p>Engines keep their own licenses; see the engine section.</p>
+    </div>
+    <div>
+      <p>Decision support for authorized security testing, by and for practitioners.</p>
+      <p>Display typeface: Source Serif 4 (SIL OFL 1.1, bundled in <code>docs/site/fonts/</code>).</p>
+    </div>
+  </div>
+</footer>
+
+<script>
+"use strict";
+document.querySelectorAll("[data-copy]").forEach(function (btn) {
+  btn.addEventListener("click", function () {
+    navigator.clipboard.writeText(document.getElementById(btn.getAttribute("data-copy")).textContent.trim()).then(function () {
+      btn.textContent = "copied";
+      setTimeout(function () { btn.textContent = "copy"; }, 1400);
+    });
+  });
+});
+</script>
+
+</body>
+</html>
