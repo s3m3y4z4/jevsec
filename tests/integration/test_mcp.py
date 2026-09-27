@@ -60,6 +60,23 @@ class TestMcpAdapter(unittest.TestCase):
         self.assertEqual(names, {"jevsec_status", "jevsec_add_finding", "jevsec_add_observation",
                                  "jevsec_queue", "jevsec_feedback", "jevsec_next"})
 
+    def test_mcp_feedback_triage_schema_e_chiamata(self) -> None:
+        self.rpc("initialize", {})
+        self.rpc("notifications/initialized", notify=True)
+        finding = {"template_id": "doc-t", "response_snippet": "vulnerable banner reflected"}
+        record = json.loads(self.rpc("tools/call", {
+            "name": "jevsec_add_finding",
+            "arguments": {"session": "mcp-fb", "finding": finding},
+        })["result"]["content"][0]["text"])
+        feedback = json.loads(self.rpc("tools/call", {
+            "name": "jevsec_feedback",
+            "arguments": {"session": "mcp-fb", "id": record["finding_ref"], "ranking_ok": False,
+                          "verdict_atteso": "false_positive", "no_auth_atteso": False},
+        })["result"]["content"][0]["text"])
+        self.assertEqual(feedback["kind"], "triage")
+        self.assertEqual(feedback["verdict_atteso"], "false_positive")
+        self.assertFalse(feedback["no_auth_atteso"])
+
     def test_mcp_tools_call_end_to_end(self) -> None:
         self.rpc("initialize", {})
         self.rpc("notifications/initialized", notify=True)

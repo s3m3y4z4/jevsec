@@ -2,7 +2,8 @@
 # Le domande sono la copia valida di harness/tasks/scanner_triage.json (spike 2026-09-22).
 
 [backend]
-base_url = "http://127.0.0.1:8000"   # solo locale per default (constitution I)
+base_url = "http://127.0.0.1:8000"
+model = "jev-latest"   # solo locale per default (constitution I)
 timeout_s = 30.0
 # 004 FR-001/FR-002: una valutazione riuscita dichiara il backend raggiungibile
 # per questa finestra; oltre, al massimo UNA domanda di verifica per finestra.

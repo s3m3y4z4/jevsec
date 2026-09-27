@@ -132,5 +132,117 @@ class TestClassBalanceManifest(unittest.TestCase):
             self.assertEqual(label_loop.pending_records("", 10, sessions), [])
 
 
+class TestTriageSessionRows(unittest.TestCase):
+    def _config(self):
+        from jevsec.config import load_config
+        return load_config(REPO_ROOT / "config" / "live-triage.toml")
+
+    @staticmethod
+    def _triage_record(finding_ref: str, state: dict | None = None) -> dict:
+        return {
+            "finding_ref": finding_ref, "verdict": "true_positive", "verdict_probability": 0.9,
+            "no_auth": True, "severity": "high", "gate": "review", "truncated": False,
+            "error": None, "target": "http://192.0.2.10:8080/",
+            "state": state or {"template_id": "doc-example-x", "response_snippet": "doc probe value"},
+        }
+
+    def _write(self, base: Path, records: list[dict], feedback: list[dict]) -> None:
+        session = base / "s1"
+        session.mkdir(parents=True)
+        with (session / "triage.jsonl").open("w", encoding="utf-8") as handle:
+            for record in records:
+                handle.write(json.dumps(record) + "\n")
+        with (session / "feedback.jsonl").open("w", encoding="utf-8") as handle:
+            for entry in feedback:
+                handle.write(json.dumps(entry) + "\n")
+
+    def test_feedback_triage_produce_righe_verdict_e_no_auth(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            base = Path(tmp)
+            self._write(base, [self._triage_record("r1:doc-example-x")],
+                        [{"id": "r1:doc-example-x", "kind": "triage", "ranking_ok": False,
+                          "verdict_atteso": "false_positive", "no_auth_atteso": False}])
+            rows = btd.rows_from_triage_sessions(base, self._config())
+        by_family = {row["family"]: row for row in rows}
+        verdict = by_family["triage_verdict"]
+        self.assertEqual(verdict["question"]["type"], "choice")
+        self.assertGreater(verdict["target"]["false_positive"], 0.9)
+        no_auth = by_family["triage_no_auth"]
+        self.assertLess(no_auth["target"]["yes"], 0.1)
+
+    def test_triage_senza_feedback_non_entra(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            base = Path(tmp)
+            self._write(base, [self._triage_record("r1:doc-example-x")],
+                        [{"id": "o1", "ranking_ok": True}])  # feedback prioritize, non triage
+            rows = btd.rows_from_triage_sessions(base, self._config())
+        self.assertEqual(rows, [])
+
+    def test_righe_triage_sessioni_dedup_per_stato(self) -> None:
+        state = {"template_id": "doc-example-x", "response_snippet": "doc probe value"}
+        with tempfile.TemporaryDirectory() as tmp:
+            base = Path(tmp)
+            self._write(base, [self._triage_record("r1:doc-example-x", state),
+                               self._triage_record("r2:doc-example-x", dict(state))],
+                        [{"id": "r1:doc-example-x", "kind": "triage", "ranking_ok": True,
+                          "verdict_atteso": "true_positive"},
+                         {"id": "r2:doc-example-x", "kind": "triage", "ranking_ok": True,
+                          "verdict_atteso": "true_positive"}])
+            rows = btd.rows_from_triage_sessions(base, self._config())
+        self.assertEqual(len(rows), 1)
+        self.assertTrue(rows[0]["id"].startswith("triage_verdict:session:s1:r1:"))
+
+
+class TestOversampling(unittest.TestCase):
+    @staticmethod
+    def _noul(family: str, yes: bool, index: int) -> dict:
+        return btd.noul_row(f"probe:{family}:{index}", family, {"text": f"doc fact {index}"},
+                            "doc instructions", 1.0 if yes else 0.0)
+
+    def test_oversampling_attivo_solo_sotto_soglia_e_sopra_minimo(self) -> None:
+        rows = [self._noul("prioritize_quick_win", i < 48, i) for i in range(55)]  # 48/7 → attiva
+        rows += [self._noul("prioritize_balanced", i < 10, 100 + i) for i in range(20)]  # 10/10 → no
+        rows += [self._noul("prioritize_thin", i < 20, 200 + i) for i in range(25)]  # 20/5 → sotto min_class_count → no
+        out, manifest = btd.oversample_minorities(rows, max_added_share=1.0)  # cap testato a parte
+        self.assertIn("prioritize_quick_win", manifest["factors"])
+        self.assertNotIn("prioritize_balanced", manifest["factors"])
+        self.assertNotIn("prioritize_thin", manifest["factors"])
+        balance = btd.class_balance_of(out)
+        self.assertEqual(balance["prioritize_quick_win"], {"yes": 48, "no": 21})  # k=3, share ~30%
+
+    def test_oversampling_deterministico_doppia_build_stessi_byte(self) -> None:
+        rows = [self._noul("prioritize_quick_win", i < 48, i) for i in range(55)]
+        first, _ = btd.oversample_minorities(rows)
+        second, _ = btd.oversample_minorities(rows)
+        self.assertEqual([json.dumps(r, sort_keys=True) for r in first],
+                         [json.dumps(r, sort_keys=True) for r in second])
+
+    def test_oversampling_cappato_10pct_e_fattore_max_3(self) -> None:
+        rows = ([self._noul("prioritize_lump", True, i) for i in range(100)] +
+                [self._noul("prioritize_lump", False, 100 + i) for i in range(6)])  # 100/6: k=8 → cap 3
+        out, manifest = btd.oversample_minorities(rows)
+        self.assertEqual(manifest["factors"]["prioritize_lump"], {"no": 3})
+        self.assertLessEqual(manifest["added_rows"], int(106 * 0.10))
+
+    def test_manifest_dichiara_fattori_e_class_balance_pre_post(self) -> None:
+        splits, manifest = btd.build_dataset(REPO_ROOT, oversample=True)
+        self.assertIn("oversampling", manifest)
+        section = manifest["oversampling"]
+        self.assertIn("class_balance_pre", section)
+        self.assertTrue(section["factors"], "attesa almeno una famiglia sbilanciata (quick_win 48/7)")
+        self.assertIn("prioritize_quick_win", section["factors"])
+        pre_no = section["class_balance_pre"]["prioritize_quick_win"].get("no", 0)
+        post_no = manifest["class_balance"]["train"]["prioritize_quick_win"].get("no", 0)
+        self.assertGreater(post_no, pre_no)
+        self.assertEqual(section["train_rows_after"], len(splits["train"]))
+
+    def test_mono_classe_non_oversamplata_e_dichiarata(self) -> None:
+        splits, manifest = btd.build_dataset(REPO_ROOT, oversample=True)
+        mono = manifest["mono_class_families"]["train"]
+        self.assertTrue(mono, "attesa almeno una famiglia mono-classe (triage_no_auth)")
+        for family in mono:
+            self.assertNotIn(family, manifest["oversampling"]["factors"])
+
+
 if __name__ == "__main__":
     unittest.main()

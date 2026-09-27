@@ -113,6 +113,7 @@ class TestServiceDaemon(unittest.TestCase):
                                 "giudizi_sbagliati": ["is_reachable"], "note": "top"})
         self.assertEqual(status, 200)
         self.assertIn("ts", feedback)
+        self.assertEqual(feedback["kind"], "prioritize")
         self.assertEqual(feedback["impact_dato"], 4)
         line = json.loads((self.sessions_dir / "fb" / "feedback.jsonl").read_text(encoding="utf-8").splitlines()[0])
         self.assertEqual(line["id"], "k9")
@@ -123,6 +124,56 @@ class TestServiceDaemon(unittest.TestCase):
         status, body = api(self.base, "POST", "/api/sessions/fb2/feedback", {"id": "fantasma", "ranking_ok": True})
         self.assertEqual(status, 404)
         self.assertIn("error", body)
+
+    def _sessione_con_finding(self, name: str) -> dict[str, Any]:
+        api(self.base, "POST", "/api/sessions", {"name": name})
+        finding = json.loads(SAMPLE.open(encoding="utf-8").readline())
+        status, record = api(self.base, "POST", f"/api/sessions/{name}/findings", finding)
+        self.assertEqual(status, 200)
+        return record
+
+    def test_feedback_finding_verdetto_registrato_con_kind_triage(self) -> None:
+        record = self._sessione_con_finding("fbt1")
+        status, feedback = api(self.base, "POST", "/api/sessions/fbt1/feedback",
+                               {"id": record["finding_ref"], "ranking_ok": False,
+                                "verdict_atteso": "true_positive", "no_auth_atteso": True, "note": "era TP"})
+        self.assertEqual(status, 200)
+        self.assertEqual(feedback["kind"], "triage")
+        self.assertEqual(feedback["verdict_atteso"], "true_positive")
+        self.assertEqual(feedback["verdict_dato"], record["verdict"])
+        self.assertEqual(feedback["verdict_probability_dato"], record["verdict_probability"])
+        self.assertEqual(feedback["no_auth_dato"], record["no_auth"])
+        self.assertTrue(feedback["no_auth_atteso"])
+        line = json.loads((self.sessions_dir / "fbt1" / "feedback.jsonl").read_text(encoding="utf-8").splitlines()[0])
+        self.assertEqual(line["kind"], "triage")
+        self.assertEqual(line["id"], record["finding_ref"])
+
+    def test_feedback_finding_ranking_ok_copia_verdetto_dato(self) -> None:
+        record = self._sessione_con_finding("fbt2")
+        status, feedback = api(self.base, "POST", "/api/sessions/fbt2/feedback",
+                               {"id": record["finding_ref"], "ranking_ok": True})
+        self.assertEqual(status, 200)
+        self.assertEqual(feedback["verdict_atteso"], record["verdict"])
+
+    def test_feedback_finding_verdetto_non_valido_400(self) -> None:
+        record = self._sessione_con_finding("fbt3")
+        status, body = api(self.base, "POST", "/api/sessions/fbt3/feedback",
+                           {"id": record["finding_ref"], "ranking_ok": True, "verdict_atteso": "boh"})
+        self.assertEqual(status, 400)
+        self.assertIn("verdict_atteso", body["error"])
+
+    def test_feedback_errore_ranking_ok_true_without_atteso_400(self) -> None:
+        self.mock_server.shutdown()  # backend giù → record degradato (verdict None)
+        self.mock_server.server_close()  # senza questa la socket resta in LISTEN e il client appende
+        api(self.base, "POST", "/api/sessions", {"name": "fbt4"})
+        finding = json.loads(SAMPLE.open(encoding="utf-8").readline())
+        status, record = api(self.base, "POST", "/api/sessions/fbt4/findings", finding)
+        self.assertEqual(status, 200)
+        self.assertIsNone(record["verdict"])
+        status, body = api(self.base, "POST", "/api/sessions/fbt4/feedback",
+                           {"id": record["finding_ref"], "ranking_ok": True})
+        self.assertEqual(status, 400)
+        self.assertIn("verdict_atteso", body["error"])
 
     def test_riavvio_senza_perdite(self) -> None:
         api(self.base, "POST", "/api/sessions", {"name": "persist"})

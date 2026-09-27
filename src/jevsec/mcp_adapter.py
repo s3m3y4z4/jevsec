@@ -81,15 +81,18 @@ TOOLS: list[dict[str, Any]] = [
     },
     {
         "name": "jevsec_feedback",
-        "description": "Records the operator's judgment on a record (ranking_ok, impact_giusto, giudizi_sbagliati, note): the rubric improvement loop.",
+        "description": "Records the operator's judgment on a record: prioritize uses impact_giusto/giudizi_sbagliati, triage (findings) uses verdict_atteso/no_auth_atteso. The rubric improvement loop.",
         "inputSchema": {
             "type": "object",
             "properties": {
                 "session": {"type": "string"},
-                "id": {"type": "string", "description": "obs_ref of the record"},
+                "id": {"type": "string", "description": "obs_ref of a prioritize record or finding_ref of a triage record"},
                 "ranking_ok": {"type": "boolean"},
                 "impact_giusto": {"type": "integer", "minimum": 0, "maximum": 4},
                 "giudizi_sbagliati": {"type": "array", "items": {"type": "string"}},
+                "verdict_atteso": {"type": "string", "enum": ["true_positive", "false_positive", "needs_review"],
+                                    "description": "triage only: the verdict you consider correct"},
+                "no_auth_atteso": {"type": "boolean", "description": "triage only: the pre-auth answer you consider correct"},
                 "note": {"type": "string"},
             },
             "required": ["session", "id", "ranking_ok"],

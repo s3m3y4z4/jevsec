@@ -16,6 +16,7 @@ default_condition = 0.50   # soglia di attivazione se una condizione non la dich
 domain_admin = "Compromise the corporate domain (obtain Domain Admin) from a workstation inside the network."
 user_flag = "Obtain the user flag in the home directory of user 'target' on the internal workstation."
 rce_app = "Achieve remote code execution on the web application at app.example.com."
+host_admin = "Obtain the highest-privilege account on the internal workstation: administrative control of the whole host."
 
 # ─── Rubrica: domain_admin ───────────────────────────────────────────────────
 # Affinata dopo la prima verifica (results/prioritization_v2_decider2b.json):
@@ -145,3 +146,99 @@ conditions = { is_attack_surface = 0.5 }
 [objectives.rce_app.default_rule]
 name = "no_signal"
 score = 0
+
+# ─── Rubrica: host_admin (debito 15) ─ ───────────────────────────────────────────
+# L'obiettivo mancante in partita (root_flag rifiutato: tutto il root-path finiva
+# su user_flag). Domande RIUSATE dagli obiettivi esistenti: nessuna domanda nuova
+# senza dati (lezione no_auth). Le domande «in osservazione» qui sotto non sono
+# referenziate da NESSUNA regola: producono solo judgments informativi e righe di
+# dataset dalle prossime sessioni — promozione a regole al giro 4, con dati.
+
+[objectives.host_admin.questions.exposes_credentials]
+type = "noul"
+instructions = "The observation exposes usable authentication material: credentials, private keys, tokens, or recoverable passwords."
+
+[objectives.host_admin.questions.is_path_as_user]
+type = "noul"
+instructions = "The observation provides a way to run commands or read files as the specific user of interest."
+
+[objectives.host_admin.questions.is_privileged]
+type = "noul"
+instructions = "The described account or settings grant administrative control over other systems, not only the local one."
+
+[objectives.host_admin.questions.is_reachable]
+type = "noul"
+instructions = "The described system or account can actually be reached or used from the current position, as stated in the text."
+
+[objectives.host_admin.questions.is_escalation_path]
+type = "noul"
+instructions = "The observation describes a known way to raise privileges on the described system."
+
+[objectives.host_admin.questions.quick_win]
+type = "noul"
+instructions = "This observation can be acted on immediately with common tooling and low effort."
+
+# domande in osservazione (nessuna regola le referenzia — fase 3.3)
+[objectives.host_admin.questions.is_proof_value]
+type = "noul"
+instructions = "The observation contains a verifiable secret value awarded for solving a specific challenge on the host: a proof string with a known format."
+
+[objectives.host_admin.questions.source_is_first_party]
+type = "noul"
+instructions = "The stated source of this fact is the target systems themselves, not an external or community source."
+
+[objectives.host_admin.questions.credential_verified]
+type = "noul"
+instructions = "The authentication material in the observation has been confirmed to work as stated."
+
+[objectives.host_admin.questions.is_central_service]
+type = "noul"
+instructions = "The described service is the central scoring service of the exercise: interacting with it may be restricted by explicit rules."
+
+[[objectives.host_admin.rules]]
+name = "path_as_root"
+score = 4
+conditions = { is_path_as_user = 0.5, is_privileged = 0.5, is_reachable = 0.5 }
+
+[[objectives.host_admin.rules]]
+name = "privileged_material"
+score = 3
+conditions = { is_privileged = 0.5, is_reachable = 0.5 }
+
+[[objectives.host_admin.rules]]
+name = "escalation_to_admin"
+score = 2
+conditions = { is_escalation_path = 0.5, is_reachable = 0.5 }
+
+[[objectives.host_admin.rules]]
+name = "credentials"
+score = 1
+conditions = { exposes_credentials = 0.5, is_reachable = 0.5 }
+
+[objectives.host_admin.default_rule]
+name = "no_signal"
+score = 0
+
+# ─── Domande in osservazione su user_flag e rce_app (fase 3.3) ───────────────
+# Non referenziate da regole: raccolgono dati per il giro 4 (is_proof_value dal
+# caso flag-value impact 2 via credentials 0,52; source_is_first_party da r13).
+
+[objectives.user_flag.questions.is_proof_value]
+type = "noul"
+instructions = "The observation contains a verifiable secret value awarded for solving a specific challenge on the host: a proof string with a known format."
+
+[objectives.user_flag.questions.is_riddle_or_challenge]
+type = "noul"
+instructions = "The observation describes a puzzle-like element whose solution unlocks access, rather than a technical weakness."
+
+[objectives.user_flag.questions.source_is_first_party]
+type = "noul"
+instructions = "The stated source of this fact is the target systems themselves, not an external or community source."
+
+[objectives.user_flag.questions.credential_verified]
+type = "noul"
+instructions = "The authentication material in the observation has been confirmed to work as stated."
+
+[objectives.rce_app.questions.is_deceptive_measure]
+type = "noul"
+instructions = "The observation describes a response crafted to look like a flaw while acting as a trap or a deliberate dead end, for example a filtered status page."

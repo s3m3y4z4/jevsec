@@ -7,6 +7,7 @@ import unittest
 from pathlib import Path
 
 from jevsec.rubric import RubricError, apply_rules, load_rubric
+from jevsec.prioritize import prioritize_observation
 
 VALID_CONFIG = """\
 [backend]
@@ -237,6 +238,54 @@ score = 0
         with self.assertRaises(RubricError) as caught:
             load_rubric(write_config(broken))
         self.assertIn("questions", str(caught.exception))
+
+
+class TestHostAdminEDomandeInOsservazione(unittest.TestCase):
+    """host_admin (debito 15) e le 6 domande in osservazione (fase 3.3)."""
+
+    def setUp(self) -> None:
+        self.config = load_rubric(Path(__file__).parent.parent.parent / "config" / "prioritization.toml")
+
+    def test_host_admin_carica_e_applica_le_regole(self) -> None:
+        rubric = self.config.objectives["host_admin"]
+        _, winner = apply_rules(
+            {"is_path_as_user": 0.9, "is_privileged": 0.9, "is_reachable": 0.8, "exposes_credentials": 0.1}, rubric)
+        self.assertEqual((winner.name, winner.score), ("path_as_root", 4))
+        _, winner = apply_rules({"is_escalation_path": 0.9, "is_reachable": 0.8}, rubric)
+        self.assertEqual((winner.name, winner.score), ("escalation_to_admin", 2))
+        _, winner = apply_rules({}, rubric)
+        self.assertEqual((winner.name, winner.score), ("no_signal", 0))
+
+    def test_le_domande_in_osservazione_non_entran_in_nessuna_regola(self) -> None:
+        observation_questions = {"is_proof_value", "is_riddle_or_challenge", "source_is_first_party",
+                                 "credential_verified", "is_koth_king_service", "is_central_service",
+                                 "is_deceptive_measure"}
+        for rubric in self.config.objectives.values():
+            for rule in rubric.rules:
+                self.assertEqual(set(rule.conditions) & observation_questions, set(),
+                                 f"{rubric.name}/{rule.name} referenzia una domanda in osservazione")
+
+    def test_le_nuove_instructions_non_contengono_parole_scenario(self) -> None:
+        import re
+        from jevsec.prioritize import SCENARIO_WORDS
+        for rubric in self.config.objectives.values():
+            for name, question in rubric.questions.items():
+                for word in SCENARIO_WORDS:
+                    self.assertIsNone(re.search(r"\b" + re.escape(word) + r"\b", question["instructions"], re.IGNORECASE),
+                                      f"{rubric.name}/{name} contiene la parola-scenario {word!r}")
+
+    def test_prioritize_chiede_anche_le_domande_in_osservazione(self) -> None:
+        rubric = self.config.objectives["user_flag"]
+
+        def fake_ask(base_url, state, questions, timeout_s, api_token=None, model=None):
+            answers = {name: {"type": "noul", "noul": 0.4} for name in questions}
+            return {"model": "fake", "answers": answers, "usage": {}}, 0.01
+
+        record = prioritize_observation({"text": "doc fact"}, "o1", self.config, rubric, ask_fn=fake_ask)
+        self.assertIsNone(record["error"])
+        for question in ("is_proof_value", "source_is_first_party", "credential_verified", "is_riddle_or_challenge"):
+            self.assertIn(question, record["judgments"])
+        self.assertEqual(record["impact"], 0)  # le risposte sotto soglia non muovono le regole esistenti
 
 
 if __name__ == "__main__":

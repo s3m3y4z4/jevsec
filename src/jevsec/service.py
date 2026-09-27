@@ -25,7 +25,13 @@ from jevsec.actions import ActionRefused, ActionsConfig, execute_action, load_ac
 from jevsec.client import SystemOneError, ask
 from jevsec.config import Config, channel_violation, is_loopback_url, load_config
 from jevsec.prioritize import build_state, observation_hash, prioritize_observation, sort_impact_records
-from jevsec.queue import bucket_of, sort_records
+from jevsec.queue import (
+    VERDICT_FALSE_POSITIVE,
+    VERDICT_NEEDS_REVIEW,
+    VERDICT_TRUE_POSITIVE,
+    bucket_of,
+    sort_records,
+)
 from jevsec.rubric import PrioritizationConfig, load_rubric
 from jevsec.triage import triage_finding
 
@@ -182,29 +188,64 @@ class Session:
         return {"triage": list(self.triage_records), "prioritize": {k: list(v) for k, v in self.impact_records.items()}}
 
     def add_feedback(self, entry: dict[str, Any]) -> dict[str, Any]:
-        record_id = entry.get("id")
-        referenced = None
-        for records in self.impact_records.values():
-            for record in records:
-                if record.get("obs_ref") == record_id:
-                    referenced = record
-                    break
-            if referenced:
-                break
+        """Sentenza su un record dell'una o dell'altra coda.
+
+        `kind` lo deriva il servizio dal record trovato (mai il client): un record
+        con `finding_ref` è triage, uno con `obs_ref` è prioritize. Le righe storiche
+        di feedback.jsonl senza `kind` si leggono come prioritize.
+        """
+        record_id = str(entry.get("id", ""))
+        referenced = find_record_by_ref(self, record_id)
         if referenced is None:
-            raise SessionError(f"prioritization record {record_id!r} not found in this session")
-        feedback = {
+            raise SessionError(f"record {record_id!r} not found in this session")
+        if "finding_ref" in referenced:
+            feedback = self._triage_feedback(entry, referenced, record_id)
+        else:
+            feedback = self._prioritize_feedback(entry, referenced, record_id)
+        with self.lock:
+            self._append("feedback.jsonl", feedback)
+        return feedback
+
+    def _prioritize_feedback(self, entry: dict[str, Any], referenced: dict[str, Any], record_id: str) -> dict[str, Any]:
+        return {
             "ts": time.strftime("%Y-%m-%dT%H:%M:%S"),
             "id": record_id,
+            "kind": "prioritize",
             "ranking_ok": bool(entry.get("ranking_ok")),
             "impact_dato": referenced.get("impact"),
             "impact_giusto": entry.get("impact_giusto"),
             "giudizi_sbagliati": entry.get("giudizi_sbagliati", []),
             "note": entry.get("note", ""),
         }
-        with self.lock:
-            self._append("feedback.jsonl", feedback)
-        return feedback
+
+    def _triage_feedback(self, entry: dict[str, Any], referenced: dict[str, Any], record_id: str) -> dict[str, Any]:
+        verdict_atteso = entry.get("verdict_atteso")
+        if verdict_atteso is None:
+            if referenced.get("verdict") is None:
+                raise SessionError("cannot confirm an errored record: provide verdict_atteso")
+            if not entry.get("ranking_ok"):
+                raise SessionError("verdict_atteso expected when ranking_ok is false")
+            verdict_atteso = referenced["verdict"]
+        elif verdict_atteso not in (VERDICT_TRUE_POSITIVE, VERDICT_FALSE_POSITIVE, VERDICT_NEEDS_REVIEW):
+            raise SessionError(
+                f"verdict_atteso must be one of {VERDICT_TRUE_POSITIVE}, "
+                f"{VERDICT_FALSE_POSITIVE}, {VERDICT_NEEDS_REVIEW} (got {verdict_atteso!r})"
+            )
+        no_auth_atteso = entry.get("no_auth_atteso")
+        if no_auth_atteso is not None and not isinstance(no_auth_atteso, bool):
+            raise SessionError("no_auth_atteso must be a boolean")
+        return {
+            "ts": time.strftime("%Y-%m-%dT%H:%M:%S"),
+            "id": record_id,
+            "kind": "triage",
+            "ranking_ok": bool(entry.get("ranking_ok")),
+            "verdict_dato": referenced.get("verdict"),
+            "verdict_atteso": verdict_atteso,
+            "verdict_probability_dato": referenced.get("verdict_probability"),
+            "no_auth_dato": referenced.get("no_auth"),
+            "no_auth_atteso": no_auth_atteso,
+            "note": entry.get("note", ""),
+        }
 
 
 def find_record_by_ref(session: Session, ref: str) -> dict[str, Any] | None:

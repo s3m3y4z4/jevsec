@@ -72,9 +72,13 @@ def build_parser() -> argparse.ArgumentParser:
     run.add_argument("--template", required=True, help="playbook template id, e.g. triage.review_tp")
     feedback = session_commands.add_parser("feedback", help="record your judgment on a record")
     feedback.add_argument("--session", required=True, help="target session")
-    feedback.add_argument("--ref", required=True, help="obs_ref of the record")
+    feedback.add_argument("--ref", required=True, help="finding_ref (triage) or obs_ref (prioritize) of the record")
     feedback.add_argument("--ranking-ok", required=True, choices=("true", "false"), help="was the ranking right?")
-    feedback.add_argument("--impact", type=int, default=None, help="the impact you consider correct (0-4)")
+    feedback.add_argument("--impact", type=int, default=None, help="prioritize: the impact you consider correct (0-4)")
+    feedback.add_argument("--giudizi", default=None, help="prioritize: wrong judgments, semicolon-separated (e.g. \"is_reachable;quick_win\")")
+    feedback.add_argument("--verdict", default=None, choices=("true_positive", "false_positive", "needs_review"),
+                          help="triage: the verdict you consider correct")
+    feedback.add_argument("--no-auth", default=None, choices=("true", "false"), help="triage: the pre-auth answer you consider correct")
     feedback.add_argument("--notes", default=None, help="free-text notes")
     acts = session_commands.add_parser("actions", help="read the session action audit log")
     acts.add_argument("--session", required=True, help="target session")
@@ -465,6 +469,12 @@ def run_session_feedback(args: argparse.Namespace) -> int:
     body: dict[str, Any] = {"id": args.ref, "ranking_ok": args.ranking_ok == "true"}
     if args.impact is not None:
         body["impact_giusto"] = args.impact
+    if args.giudizi:
+        body["giudizi_sbagliati"] = [item.strip() for item in args.giudizi.split(";") if item.strip()]
+    if args.verdict is not None:
+        body["verdict_atteso"] = args.verdict
+    if args.no_auth is not None:
+        body["no_auth_atteso"] = args.no_auth == "true"
     if args.notes:
         body["note"] = args.notes
     try:

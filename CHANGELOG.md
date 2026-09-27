@@ -2,6 +2,16 @@
 
 Notable, user-visible changes per version. Dates are ISO-8601.
 
+## 0.3 — triage feedback loop, host_admin rubric, questions under observation
+
+- **Operator feedback on triage records**: `jevsec_feedback` now accepts finding refs — record the verdict you consider correct (`verdict_atteso`) and the pre-auth answer (`no_auth_atteso`). The CLI gains `--verdict`, `--no-auth` and `--giudizi`; the console adds a feedback form to every finding card. Verdicts on triage feed the training-data loop — feedback only: triage rows without an operator verdict never enter the dataset.
+- **New built-in rubric `host_admin`** (highest-privilege account on a host): `path_as_root` 4, `privileged_material` 3, `escalation_to_admin` 2, `credentials` 1 — assembled from existing atomic questions, no new ones, reviewable in `config/prioritization.toml`.
+- **Six questions under observation** (`is_proof_value`, `is_riddle_or_challenge`, `source_is_first_party`, `credential_verified`, `is_central_service`, `is_deceptive_measure`): declared on the relevant objectives but referenced by no rule. They produce informative judgments and collect labeled data from real sessions; promotion to rules happens only when the data exists.
+- **Bench rows only for rule questions**: questions that no rule references never receive invented labels from synthetic benches.
+- **Console**: inline favicon (no extra route or asset); feedback form on finding cards.
+- **Config**: `model` materialized in `config/live-triage.toml`.
+- **Docs**: new "Serving your own engine" section; engine wording fixed (the install script sets up decider-2b; jevsec-003 is the backend we run and publish); the custom-objective example now declares every question its rules reference.
+
 ## 0.2 — assisted execution, engine-agnostic channel
 
 - **Suggested playbooks**: every top record carries the next operational step as copyable text, built by the code from templates in `config/actions.toml` (never by the model); an inert, fully documented example ships in `config/examples/actions.toml`.
