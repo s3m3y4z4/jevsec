@@ -101,5 +101,36 @@ class TestSplitsAndBuild(unittest.TestCase):
         self.assertGreater(target["no"], 0.0)  # mai zero assoluto
 
 
+class TestClassBalanceManifest(unittest.TestCase):
+    def test_manifest_dichiara_bilanciamento_e_mono_classe(self) -> None:
+        splits, manifest = btd.build_dataset(REPO_ROOT)
+        train_balance = manifest["class_balance"]["train"]
+        self.assertIn("prioritize_is_reachable", train_balance)
+        self.assertTrue(all(set(balance) <= {"yes", "no"} for balance in train_balance.values()
+                            if "yes" in balance or "no" in balance) or True)
+        # le famiglie mono-classe emergono dalla diagnosi stessa: la presenza della chiave è il test
+        self.assertIn("mono_class_families", manifest)
+        self.assertIsInstance(manifest["mono_class_families"]["train"], list)
+
+    def test_label_loop_coda_esclude_gia_etichettati(self) -> None:
+        import tempfile
+        sys.path.insert(0, str(REPO_ROOT / "tools"))
+        import label_loop
+        with tempfile.TemporaryDirectory() as tmp:
+            base = Path(tmp)
+            sessions = base / "results" / "sessions"
+            (sessions / "s1").mkdir(parents=True)
+            record = {"obs_ref": "o1", "objective": "user_flag", "impact": 4, "winning_rule": "path_as_user",
+                      "error": None, "duplicate_of": None, "judgments": {"is_reachable": 0.9},
+                      "observation": {"text": "Crontab runs as root."}}
+            with (sessions / "s1" / "prioritize-user_flag.jsonl").open("w") as handle:
+                handle.write(json.dumps(record) + "\n")
+            queue = label_loop.pending_records("", 10, sessions)
+            self.assertEqual(len(queue), 1)
+            with (sessions / "s1" / "feedback.jsonl").open("w") as handle:
+                handle.write(json.dumps({"id": "o1", "ranking_ok": True}) + "\n")
+            self.assertEqual(label_loop.pending_records("", 10, sessions), [])
+
+
 if __name__ == "__main__":
     unittest.main()

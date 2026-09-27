@@ -30,7 +30,7 @@ PYTHONPATH=src python3 -m jevsec triage \
 
 Expected outcome: one triaged record per input line on stdout, a readable queue on stderr ordered by priority, exit code 0 — the whole run completes in seconds. From clone to last record this path is designed to stay under five minutes on a clean machine.
 
-To use a real engine (decider-2b on a CUDA GPU with ≥ 8 GB VRAM), see [Real engines on your own hardware](#real-engines-on-your-own-hardware) below — or point `base_url` at any System One-compatible backend you already run.
+To use a real engine, see [Real engines on your own hardware](#real-engines-on-your-own-hardware) below — or point `base_url` at any System One-compatible backend you already run. We also publish [**jevsec-002**](https://huggingface.co/dr3x1/jevsec-002), a fine-tuned decision model for security triage (GGUF, Apache-2.0): serve it with any System One-compatible llama.cpp runtime and point `base_url` there.
 
 ## The full cycle, with or without an AI agent
 
