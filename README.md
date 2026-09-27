@@ -1,5 +1,7 @@
 # JEVSEC
 
+**Project page**: https://s3m3y4z4.github.io/jevsec/ — the tool explained in one screen.
+
 Active decision-support tooling for authorized penetration testing and CTFs, built on local System One-compatible decision engines. Everything runs on your machine; no engagement data leaves it unless you explicitly configure a remote decision backend.
 
 JEVSEC is a **decision and triage layer**: it orders queues and explains every judgment. It never executes commands, never touches your targets, and never replaces your judgment — under the confidence threshold, or on any error, a human reviews.
