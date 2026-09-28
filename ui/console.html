@@ -196,6 +196,23 @@
   .ingest-form input { background: var(--bg-deep); color: var(--text); border: 1px solid var(--line);
                        border-radius: 4px; padding: 5px 8px; font: 12.5px/1.4 var(--mono); }
   .ingest-actions { display: flex; gap: .6rem; align-items: center; flex-wrap: wrap; }
+  /* ---------- inbox deliveries ---------- */
+  .inbox-body { padding: .7rem 1rem 1rem; display: grid; gap: .55rem; }
+  .inbox-dir { font-family: var(--mono); font-size: 11.5px; color: var(--dim); word-break: break-all;
+               padding: .35rem .55rem; border: 1px dashed var(--line); border-radius: 6px; cursor: pointer; }
+  .inbox-dir:hover { color: var(--bright); }
+  .delivery { display: grid; gap: .25rem; padding: .5rem .6rem; border: 1px solid var(--line);
+              border-radius: 8px; background: var(--bg-deep); }
+  .delivery .row1 { display: flex; gap: .5rem; align-items: baseline; justify-content: space-between; }
+  .delivery .fname { font-family: var(--mono); font-size: 12px; color: var(--bright); word-break: break-all; }
+  .delivery .counts { font-size: 12px; color: var(--dim); }
+  .delivery .dnote { font-size: 11.5px; color: var(--warn); word-break: break-word; }
+  .delivery ul.derrors { margin: 0; padding-left: 1.1rem; font-size: 11.5px; color: var(--bad); }
+  .delivery .badge { font-size: 10.5px; padding: .05rem .45rem; border-radius: 999px;
+                     border: 1px solid var(--line); color: var(--dim); white-space: nowrap; }
+  .delivery .badge.ok { color: var(--ok); border-color: rgba(76, 195, 138, .45); }
+  .delivery .badge.warn { color: var(--warn); border-color: rgba(217, 164, 65, .45); }
+  .delivery .badge.bad { color: var(--bad); border-color: rgba(229, 84, 107, .45); }
   .btn.primary { background: var(--accent); color: var(--bg-deep); border-color: var(--accent); font-weight: 600; }
   .btn.primary:hover { filter: brightness(1.1); background: var(--accent); }
   .btn.ghost { color: var(--dim); border-color: var(--line); background: none; }
@@ -362,6 +379,14 @@
             </div>
             <p class="example-hint">the model never sees the objective or scenario words — it judges facts.</p>
           </form>
+        </div>
+      </section>
+
+      <section class="panel" id="inbox-panel" hidden>
+        <div class="panel-head"><h2>Inbox deliveries</h2></div>
+        <div class="inbox-body">
+          <div class="inbox-dir" id="inbox-dir" title="click to copy — drop findings-*.jsonl / observations-<objective>-*.jsonl here"></div>
+          <div id="inbox-deliveries"></div>
         </div>
       </section>
 
@@ -858,6 +883,54 @@ function renderAudit(audit) {
     : '<div class="empty">no actions executed — assisted execution needs config and your confirmation.</div>';
 }
 
+/* ---------- inbox deliveries (fingerprint: no re-render if unchanged) ---------- */
+
+let lastInboxFingerprint = "";
+const DELIVERY_BADGE = { processed: "ok", partial: "warn", rejected: "bad", interrupted: "warn" };
+
+async function fetchInbox() {
+  let inbox;
+  try {
+    inbox = await jfetch(`/api/sessions/${current}/inbox`);
+  } catch {
+    $("inbox-panel").hidden = true;
+    return;
+  }
+  $("inbox-panel").hidden = false;
+  const log = inbox.log || [];
+  const last = log[log.length - 1] || {};
+  const fingerprint = `${inbox.directory}|${(inbox.pending || []).join(",")}|${log.length}|${last.ts}:${last.sha256}:${last.status}`;
+  if (fingerprint === lastInboxFingerprint) return;
+  lastInboxFingerprint = fingerprint;
+  const dirEl = $("inbox-dir");
+  if (dirEl.textContent !== inbox.directory) {
+    dirEl.textContent = inbox.directory;
+    dirEl.onclick = () => navigator.clipboard?.writeText(inbox.directory);
+  }
+  const parts = [];
+  if ((inbox.pending || []).length)
+    parts.push(`<div class="delivery"><div class="row1"><span class="fname">${esc(inbox.pending.join(", "))}</span>
+      <span class="badge">pending</span></div><span class="counts">waiting for stability — delivery is evaluated once the file stops changing</span></div>`);
+  for (const entry of log.filter((e) => e.event === "end").slice(-8).reverse()) {
+    parts.push(`
+      <div class="delivery">
+        <div class="row1">
+          <span class="fname">${esc(entry.file)}</span>
+          <span class="badge ${DELIVERY_BADGE[entry.status] || ""}">${esc(entry.status)}</span>
+        </div>
+        <span class="counts">${esc(entry.kind ?? "")}${entry.objective ? ` · ${esc(entry.objective)}` : ""}
+          · lines ${entry.lines ?? "–"} · evaluated ${entry.evaluated ?? "–"} · duplicates ${entry.duplicates ?? "–"}
+          ${entry.duration_s !== undefined ? ` · ${entry.duration_s}s` : ""}</span>
+        ${entry.errors && entry.errors.length
+          ? `<ul class="derrors">${entry.errors.map((x) => `<li>line ${x.line}: ${esc(x.error)}</li>`).join("")}</ul>` : ""}
+        ${entry.note ? `<span class="dnote">${esc(entry.note)}</span>` : ""}
+      </div>`);
+  }
+  $("inbox-deliveries").innerHTML = parts.length
+    ? parts.join("")
+    : '<div class="empty">no deliveries yet — copy a findings-*.jsonl into the directory above.</div>';
+}
+
 async function refresh() {
   try {
     const status = await jfetch("/api/status");
@@ -888,12 +961,14 @@ async function refresh() {
   try {
     renderAudit(await jfetch(`/api/sessions/${current}/actions`));
   } catch { $("audit-body").innerHTML = '<div class="empty">audit unavailable</div>'; }
+  await fetchInbox();
 }
 
 function resetSessionView() {
   seenEver = new Set(); unseen = new Set();
   baselineDone = false; lastMaxSeq = -1; fullRecords.clear();
-  lastQueueFingerprint = "";
+  lastQueueFingerprint = ""; lastInboxFingerprint = "";
+  $("inbox-panel").hidden = true;
 }
 
 $("session-select").addEventListener("change", (e) => { current = e.target.value || null; resetSessionView(); refresh(); });

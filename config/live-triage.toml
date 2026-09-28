@@ -29,6 +29,16 @@ order = [
     "false_positive",     # scartabili per ultimo
 ]
 
+[inbox]
+# Drop-zone di consegna (spec 007): results/sessions/<sessione>/inbox/
+# riceve findings-*.jsonl e observations-<objective>-*.jsonl valutati
+# automaticamente. L'inbox valuta soltanto: nessuna azione, nessun traffico
+# oltre il backend qui sopra.
+enabled = true
+interval_s = 2.0          # scansione della zona di consegna
+max_file_bytes = 2000000  # oltre: scarto con diagnosi, senza leggere
+stability_reads = 2       # dimensioni invariate per N letture consecutive
+
 [questions.verdict]
 type = "choice"
 instructions = "Classify this scanner finding based only on the evidence included in it."

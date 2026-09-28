@@ -49,13 +49,27 @@ PYTHONPATH=src python3 -m jevsec session next --session demo --objective user_fl
 
 The browser console (`http://127.0.0.1:7860/`) reads the same queues, shows record details with the redacted observation text, and accepts findings, observations and operator feedback from its forms.
 
-If you drive an AI agent, six optional MCP tools exist (`jevsec_status`, `jevsec_add_finding`, `jevsec_add_observation`, `jevsec_queue`, `jevsec_next`, `jevsec_feedback`):
+If you drive an AI agent, seven optional MCP tools exist (`jevsec_status`, `jevsec_add_finding`, `jevsec_add_observation`, `jevsec_queue`, `jevsec_next`, `jevsec_feedback`, `jevsec_inbox`):
 
 ```bash
 claude mcp add jevsec --env PYTHONPATH=$PWD/src -- python3 -m jevsec.mcp_adapter --url http://127.0.0.1:7860
 ```
 
 During an engagement you will tell your agent "pass this finding to jevsec and show me the queue" or "what does jevsec advise now?": it will use the tools, not memorized commands.
+
+## Deliver files: the session inbox
+
+Copying a file into a session directory is a complete way to feed JEVSEC — no forms, no HTTP client:
+
+```bash
+mkdir -p results/sessions/demo/inbox
+printf '%s\n' '{"template_id":"doc-x","matched_at":"http://192.0.2.10/","response_snippet":"reflected marker","info":{"severity":"high"}}' \
+  > results/sessions/demo/inbox/findings-scan.jsonl
+```
+
+The daemon picks the file up within `[inbox] interval_s` (default 2 s, `config/live-triage.toml`), evaluates every line, and archives the file — it is never deleted. File names are the contract: `findings-*.jsonl` delivers scanner findings (one JSON object per line), `observations-<objective>-*.jsonl` delivers observations for that objective. Every delivery lands in the session's delivery log with per-line outcomes: evaluated, duplicated, or failed with the line number. Recopying the same content does nothing (it is addressed by its sha256); a daemon restart never re-evaluates a file it had started.
+
+The inbox **only evaluates**: nothing delivered there can trigger an action or any traffic beyond the configured backend. The console shows the delivery log in the "Inbox deliveries" panel; agents read it with the `jevsec_inbox` tool, which also tells them the exact directory to write to.
 
 ## Assisted execution (off by default)
 

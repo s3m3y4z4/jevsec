@@ -2,6 +2,16 @@
 
 Notable, user-visible changes per version. Dates are ISO-8601.
 
+## 0.4-beta.1 — session inbox: deliver files instead of pasting
+
+*Pre-release: published as `v0.4-beta.1` for early use; the stable line stays 0.3 until this is validated in the field.*
+
+- **Session inbox (drop-zone)**: copy `findings-*.jsonl` or `observations-<objective>-*.jsonl` into `results/sessions/<session>/inbox/` and the daemon evaluates every line within `[inbox] interval_s` (default 2 s). Delivered files are archived, never deleted; the feature turns off with `[inbox] enabled = false`.
+- **Delivery log per session** (`inbox-log.jsonl`, the "Inbox deliveries" console panel, and the new `jevsec_inbox` MCP tool): every file closes with a final status — processed, partial, rejected, already-processed or interrupted — with per-line outcomes, per-line errors and durations.
+- **Crash-safe by construction**: deliveries are addressed by the sha256 of their content (recopying the same file evaluates nothing twice); a daemon restart closes interrupted deliveries without ever re-evaluating them, and records already written stay exactly once.
+- **Duplicate findings are skipped, not re-judged**: triage records now persist `finding_hash` (computed on the raw finding before redaction); a delivered line whose exact content is already in the queue counts as a duplicate in the log, whatever channel it arrived from.
+- **The inbox only evaluates**: no delivered file can trigger an action or any traffic beyond the configured backend.
+
 ## 0.3 — triage feedback loop, host_admin rubric, questions under observation
 
 - **Operator feedback on triage records**: `jevsec_feedback` now accepts finding refs — record the verdict you consider correct (`verdict_atteso`) and the pre-auth answer (`no_auth_atteso`). The CLI gains `--verdict`, `--no-auth` and `--giudizi`; the console adds a feedback form to every finding card. Verdicts on triage feed the training-data loop — feedback only: triage rows without an operator verdict never enter the dataset.

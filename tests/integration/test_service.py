@@ -215,6 +215,9 @@ class TestServiceDaemon(unittest.TestCase):
         self.assertIn("visibilitychange", page)
         self.assertIn("REFRESH_HIDDEN_MS", page)
         self.assertIn("obs-text", page)
+        self.assertIn("inbox-panel", page)
+        self.assertIn("inbox-deliveries", page)
+        self.assertIn("fetchInbox", page)
 
     def test_osservazione_duplicata_puntatore_e_zero_nuove_valutazioni(self) -> None:
         api(self.base, "POST", "/api/sessions", {"name": "dup"})
@@ -532,6 +535,60 @@ timeout_s = 30
             self.assertIn(expected, error["error"])
         status, audit = api(self.base, "GET", "/api/sessions/act/actions")
         self.assertEqual(audit, [])
+
+
+class TestFindingHash(unittest.TestCase):
+    """Spec 007 FR-008: impronta del finding grezzo persistita nel record, ricostruibile."""
+
+    def setUp(self) -> None:
+        mock_server = HTTPServer(("127.0.0.1", 0), mock_systemone.Handler)
+        threading.Thread(target=mock_server.serve_forever, daemon=True).start()
+        self.addCleanup(mock_server.shutdown)
+        self.sessions_dir = Path(tempfile.mkdtemp())
+        import dataclasses
+        self.triage = dataclasses.replace(
+            load_config(TRIAGE_CONFIG_PATH), base_url=f"http://127.0.0.1:{mock_server.server_address[1]}"
+        )
+        self.prioritization = load_rubric(PRIORITIZATION_CONFIG_PATH)
+
+    def _session(self, name: str):
+        from jevsec.service import Session
+        return Session(self.sessions_dir / name, self.triage, self.prioritization)
+
+    FINDING = {
+        "template_id": "doc-template",
+        "matched_at": "http://192.0.2.10/app/login",
+        "response_snippet": "reflected proof",
+        "info": {"severity": "high"},
+    }
+
+    def test_add_finding_persiste_hash_canonico_e_stesso_contenuto_stesso_hash(self) -> None:
+        import hashlib
+        expected = hashlib.sha256(
+            json.dumps(self.FINDING, sort_keys=True, ensure_ascii=False).encode("utf-8")
+        ).hexdigest()
+        session = self._session("hash")
+        first = session.add_finding(dict(self.FINDING))
+        second = session.add_finding(dict(self.FINDING))
+        self.assertEqual(first["finding_hash"], expected)
+        self.assertEqual(second["finding_hash"], expected)
+        self.assertEqual(session.finding_hashes, {expected})
+
+    def test_reload_ricostruisce_l_insieme_dai_record(self) -> None:
+        session = self._session("reload")
+        session.add_finding(dict(self.FINDING))
+        reopened = self._session("reload")
+        self.assertIn(next(iter(session.finding_hashes)), reopened.finding_hashes)
+
+    def test_record_storico_senza_campo_tollerato_ed_escluso(self) -> None:
+        session = self._session("storico")
+        with (self.sessions_dir / "storico" / "triage.jsonl").open("a", encoding="utf-8") as handle:
+            handle.write(json.dumps({"finding_ref": "r0:old", "verdict": None, "gate": "review"}) + "\n")
+        reopened = self._session("storico")
+        self.assertEqual(reopened.finding_hashes, set())
+        record = reopened.add_finding(dict(self.FINDING))
+        self.assertEqual(len(reopened.finding_hashes), 1)
+        self.assertIn(record["finding_hash"], reopened.finding_hashes)
 
 
 if __name__ == "__main__":

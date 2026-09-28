@@ -58,7 +58,19 @@ class TestMcpAdapter(unittest.TestCase):
         listed = self.rpc("tools/list")
         names = {tool["name"] for tool in listed["result"]["tools"]}
         self.assertEqual(names, {"jevsec_status", "jevsec_add_finding", "jevsec_add_observation",
-                                 "jevsec_queue", "jevsec_feedback", "jevsec_next"})
+                                 "jevsec_queue", "jevsec_feedback", "jevsec_next", "jevsec_inbox"})
+
+    def test_mcp_inbox_payload_uguale_all_endpoint(self) -> None:
+        self.rpc("initialize", {})
+        self.rpc("notifications/initialized", notify=True)
+        payload = json.loads(self.rpc("tools/call", {
+            "name": "jevsec_inbox",
+            "arguments": {"session": "mcp-inbox"},
+        })["result"]["content"][0]["text"])
+        self.assertIn("directory", payload)
+        self.assertIn("pending", payload)
+        self.assertIn("log", payload)
+        self.assertTrue(str(payload["directory"]).endswith("/inbox"))
 
     def test_mcp_feedback_triage_schema_e_chiamata(self) -> None:
         self.rpc("initialize", {})

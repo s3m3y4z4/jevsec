@@ -24,6 +24,7 @@ from jevsec import __version__
 from jevsec.actions import ActionRefused, ActionsConfig, execute_action, load_actions_config, proposal_for
 from jevsec.client import SystemOneError, ask
 from jevsec.config import Config, channel_violation, is_loopback_url, load_config
+from jevsec.inbox import ACTION_IGNORE, DeliveryLog, InboxProcessor, finding_hash, route_name
 from jevsec.prioritize import build_state, observation_hash, prioritize_observation, sort_impact_records
 from jevsec.queue import (
     VERDICT_FALSE_POSITIVE,
@@ -79,12 +80,15 @@ class Session:
         self.triage_records: list[dict[str, Any]] = []
         self.impact_records: dict[str, list[dict[str, Any]]] = {}
         self.obs_hashes: dict[str, dict[str, str]] = {}
+        self.finding_hashes: set[str] = set()
         directory.mkdir(parents=True, exist_ok=True)
         self._reload()
 
     def _reload(self) -> None:
         for line in self._read_jsonl(self.directory / "triage.jsonl"):
             self.triage_records.append(line)
+            if line.get("finding_hash"):
+                self.finding_hashes.add(line["finding_hash"])
         for path in sorted(self.directory.glob("prioritize-*.jsonl")):
             objective = path.stem.removeprefix("prioritize-")
             records = list(self._read_jsonl(path))
@@ -110,8 +114,10 @@ class Session:
     def add_finding(self, finding: dict[str, Any]) -> dict[str, Any]:
         number = len(self.triage_records) + 1
         record = triage_finding(finding, f"r{number}:{finding.get('template_id', 'unknown')}", self.triage_config)
+        record["finding_hash"] = finding_hash(finding)
         with self.lock:
             self.triage_records.append(record)
+            self.finding_hashes.add(record["finding_hash"])
             self._append("triage.jsonl", record)
         return record
 
@@ -285,6 +291,44 @@ class SessionStore:
         return sorted(path.name for path in self.sessions_dir.iterdir() if path.is_dir()) if self.sessions_dir.exists() else []
 
 
+class InboxWatcher:
+    """Un ciclo per tutte le sessioni: consegne seriali, registro single-writer (spec 007)."""
+
+    def __init__(self, store: SessionStore, config: Any, note_backend_outcome: Any):
+        self.store = store
+        self.config = config
+        self.note_backend_outcome = note_backend_outcome
+        self._processors: dict[str, InboxProcessor] = {}
+        self._stop = threading.Event()
+
+    def scan_once(self) -> None:
+        for name in self.store.known_names():
+            if not SESSION_NAME_PATTERN.match(name):
+                print(f"inbox: skipping invalid session directory {name!r}", file=sys.stderr)
+                continue
+            if not ((self.store.sessions_dir / name / "inbox").exists()
+                    or (self.store.sessions_dir / name / "inbox-log.jsonl").exists()):
+                continue
+            try:
+                processor = self._processors.get(name)
+                if processor is None:
+                    processor = InboxProcessor(self.store.open(name), self.config, self.note_backend_outcome)
+                    self._processors[name] = processor
+                processor.scan()
+            except OSError as error:
+                print(f"inbox: session {name!r} skipped: {error}", file=sys.stderr)
+
+    def run(self) -> None:
+        while not self._stop.wait(self.config.interval_s):
+            try:
+                self.scan_once()
+            except Exception as error:  # noqa: BLE001 - il ciclo demone sopravvive a qualunque sessione
+                print(f"inbox: scan failed: {error}", file=sys.stderr)
+
+    def stop(self) -> None:
+        self._stop.set()
+
+
 def build_service(
     sessions_dir: Path,
     triage_config: Config,
@@ -331,6 +375,12 @@ def build_service(
     service_log_path.parent.mkdir(parents=True, exist_ok=True)
     service_log = service_log_path.open("a", encoding="utf-8")
     service_log_lock = threading.Lock()
+
+    inbox_watcher = None
+    if triage_config.inbox.enabled:
+        inbox_watcher = InboxWatcher(store, triage_config.inbox, note_backend_outcome)
+        threading.Thread(target=inbox_watcher.run, daemon=True, name="jevsec-inbox").start()
+    shared["inbox_watcher"] = inbox_watcher
 
     class Handler(BaseHTTPRequestHandler):
         def log_message(self, format: str, *args: Any) -> None:  # silenzia il log default su stderr
@@ -383,12 +433,23 @@ def build_service(
                         "version": SERVICE_VERSION,
                         "sessions": store.known_names(),
                         "actions": {"enabled": store.actions_config.enabled},
+                        "inbox": {"enabled": triage_config.inbox.enabled},
                         "backend": {
                             "mode": "loopback" if is_loopback_url(triage_config.base_url) else "remote-secure",
                             "reachable": backend_reachable(),
                             "last_success_ts": shared["backend_health"]["last_success_wall"],
                         },
                     })
+                    return
+                if len(parts) == 4 and parts[:2] == ["api", "sessions"] and parts[3] == "inbox":
+                    session = self._session(parts[2])
+                    inbox_dir = session.directory / "inbox"
+                    pending = sorted(
+                        path.name for path in inbox_dir.iterdir()
+                        if path.is_file() and route_name(path.name).action != ACTION_IGNORE
+                    ) if inbox_dir.exists() else []
+                    entries = DeliveryLog(session.directory / "inbox-log.jsonl").entries()
+                    self._reply(200, {"directory": str(inbox_dir), "pending": pending, "log": entries})
                     return
                 if len(parts) == 4 and parts[:2] == ["api", "sessions"] and parts[3] == "actions":
                     session = self._session(parts[2])

@@ -98,6 +98,17 @@ TOOLS: list[dict[str, Any]] = [
             "required": ["session", "id", "ranking_ok"],
         },
     },
+    {
+        "name": "jevsec_inbox",
+        "description": "Inbox delivery log for a session: where to deliver files (absolute directory), files pending, and the per-file outcomes (evaluated, duplicates, per-line errors, status). Read-only.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "session": {"type": "string", "description": "session name"},
+            },
+            "required": ["session"],
+        },
+    },
 ]
 
 
@@ -151,6 +162,8 @@ def call_tool(base_url: str, name: str, arguments: dict[str, Any]) -> dict[str, 
         return {"prioritize": queues["prioritize"]}
     if name == "jevsec_feedback":
         return http_call(base_url, "POST", f"/api/sessions/{arguments['session']}/feedback", arguments)
+    if name == "jevsec_inbox":
+        return http_call(base_url, "GET", f"/api/sessions/{arguments['session']}/inbox")
     raise RuntimeError(f"unknown tool: {name}")
 
 

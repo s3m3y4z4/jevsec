@@ -7,7 +7,7 @@ in exit 2 prima di leggere qualunque riga di input (FR-004, FR-005).
 from __future__ import annotations
 
 import tomllib
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 from urllib.parse import urlsplit
@@ -49,6 +49,16 @@ def channel_violation(base_url: str, api_token: str | None) -> str | None:
 
 
 @dataclass(frozen=True)
+class InboxConfig:
+    """Parametri della drop-zone di consegna (spec 007 FR-011)."""
+
+    enabled: bool = True
+    interval_s: float = 2.0
+    max_file_bytes: int = 2_000_000
+    stability_reads: int = 2
+
+
+@dataclass(frozen=True)
 class Config:
     """Configurazione validata: soglie, ordine coda, domande wire."""
 
@@ -63,6 +73,7 @@ class Config:
     questions: dict[str, dict[str, Any]]
     api_token: str | None = None
     model: str = "jev-latest"
+    inbox: InboxConfig = field(default_factory=InboxConfig)
 
 
 def _require_probability(section: str, key: str, value: Any) -> float:
@@ -104,6 +115,33 @@ def _validate_queue(order: Any) -> tuple[str, ...]:
     if missing:
         raise ConfigError(f"[queue] order must be a permutation of all buckets, missing: {sorted(missing)}")
     return names
+
+
+def _validate_inbox(raw_inbox: Any) -> InboxConfig:
+    """Spec 007 FR-011: sezione opzionale, default in un punto solo (la dataclass)."""
+    base = InboxConfig()
+    if raw_inbox is None:
+        return base
+    if not isinstance(raw_inbox, dict):
+        raise ConfigError("[inbox] expected as a table")
+    enabled = raw_inbox.get("enabled", base.enabled)
+    if not isinstance(enabled, bool):
+        raise ConfigError(f"[inbox] enabled={enabled!r}: expected a boolean")
+    interval_s = raw_inbox.get("interval_s", base.interval_s)
+    if isinstance(interval_s, bool) or not isinstance(interval_s, (int, float)) or float(interval_s) <= 0:
+        raise ConfigError(f"[inbox] interval_s={interval_s!r}: expected a positive number")
+    max_file_bytes = raw_inbox.get("max_file_bytes", base.max_file_bytes)
+    if isinstance(max_file_bytes, bool) or not isinstance(max_file_bytes, int) or max_file_bytes <= 0:
+        raise ConfigError(f"[inbox] max_file_bytes={max_file_bytes!r}: expected a positive integer")
+    stability_reads = raw_inbox.get("stability_reads", base.stability_reads)
+    if isinstance(stability_reads, bool) or not isinstance(stability_reads, int) or stability_reads < 2:
+        raise ConfigError(f"[inbox] stability_reads={stability_reads!r}: expected an integer >= 2 (one read is not consecutive)")
+    return InboxConfig(
+        enabled=enabled,
+        interval_s=float(interval_s),
+        max_file_bytes=max_file_bytes,
+        stability_reads=stability_reads,
+    )
 
 
 def load_config(path: Path) -> Config:
@@ -181,4 +219,5 @@ def load_config(path: Path) -> Config:
         questions=questions,
         api_token=api_token,
         model=model,
+        inbox=_validate_inbox(raw.get("inbox")),
     )

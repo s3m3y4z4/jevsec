@@ -197,5 +197,52 @@ instructions = "Reachable before authentication."
         self.assertNotIn("secret-doc", str(caught.exception))
 
 
+class TestInboxConfig(unittest.TestCase):
+    """Spec 007 FR-011: sezione [inbox] opzionale, default documentati, violazioni fatali."""
+
+    def test_inbox_assente_default_documentati(self) -> None:
+        config = load_config(write_config(VALID_CONFIG))
+        self.assertTrue(config.inbox.enabled)
+        self.assertEqual(config.inbox.interval_s, 2.0)
+        self.assertEqual(config.inbox.max_file_bytes, 2000000)
+        self.assertEqual(config.inbox.stability_reads, 2)
+
+    def test_inbox_valida_valori_letti(self) -> None:
+        config = load_config(write_config(
+            VALID_CONFIG + "\n[inbox]\nenabled = false\ninterval_s = 5.0\nmax_file_bytes = 1000\nstability_reads = 3\n"
+        ))
+        self.assertFalse(config.inbox.enabled)
+        self.assertEqual(config.inbox.interval_s, 5.0)
+        self.assertEqual(config.inbox.max_file_bytes, 1000)
+        self.assertEqual(config.inbox.stability_reads, 3)
+
+    def test_inbox_interval_s_zero_config_error(self) -> None:
+        broken = VALID_CONFIG + "\n[inbox]\ninterval_s = 0\n"
+        with self.assertRaises(ConfigError):
+            load_config(write_config(broken))
+
+    def test_inbox_max_file_bytes_zero_config_error(self) -> None:
+        broken = VALID_CONFIG + "\n[inbox]\nmax_file_bytes = 0\n"
+        with self.assertRaises(ConfigError):
+            load_config(write_config(broken))
+
+    def test_inbox_stability_reads_uno_config_error(self) -> None:
+        broken = VALID_CONFIG + "\n[inbox]\nstability_reads = 1\n"
+        with self.assertRaises(ConfigError):
+            load_config(write_config(broken))
+
+    def test_inbox_enabled_non_bool_config_error(self) -> None:
+        broken = VALID_CONFIG + '\n[inbox]\nenabled = "sì"\n'
+        with self.assertRaises(ConfigError):
+            load_config(write_config(broken))
+
+    def test_replace_conserva_inbox(self) -> None:
+        import dataclasses
+        config = load_config(write_config(VALID_CONFIG + "\n[inbox]\ninterval_s = 0.05\n"))
+        patched = dataclasses.replace(config, base_url="http://127.0.0.1:9999")
+        self.assertEqual(patched.inbox.interval_s, 0.05)
+        self.assertEqual(patched.base_url, "http://127.0.0.1:9999")
+
+
 if __name__ == "__main__":
     unittest.main()
